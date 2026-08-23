@@ -130,6 +130,12 @@ jobs:
       - name: commit-msg signer trust boundary
         run: bash tools/test-commit-msg-signer.sh
 
+      # A git nem futtatja újra a commit-msg hookot rebase-nél, a commit fája
+      # viszont megváltozik. Mérve (#81): rebase után az ág MINDEN commitja
+      # ellenőrizhetetlen (OK: 0, FAIL: 3) — nem részleges hatás.
+      - name: a rebase leaves signatures re-signable
+        run: bash tools/test-resign-on-rebase.sh
+
       # A repó nem azzal a hookkal írt alá, amit kiad: a core.hooksPath egy repón
       # kívüli megosztott könyvtárra mutatott, benne a signer elavult másolatával
       # (#82). A CI-ban nincs hook telepítve, ezért itt a CHECKER-t mérjük
