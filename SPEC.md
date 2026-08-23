@@ -167,11 +167,19 @@ olyan még nincs. Egy leváltott futás késői eredményét semmi nem utasítja
 `error` státusz jelentheti azt is, hogy az agent még dolgozik: a finalizer
 szándékosan nem öli meg, és ezt a `test-run-job-finalizer.sh` méri is.
 
-A 2026-08-23-i mérés közben megfigyelve: a wrapper `SIGTERM`-je után a
-runner-gyerek **túlélte és utólag megírta a végállapotot** — egy megszüntetett
-futás késői eredménye elérte a metát. Ez megfigyelés, nem célzott mérés: az a
-forgatókönyv rosszul volt megtervezve, és nem adjuk elő bizonyítékként. Saját
-mérést érdemel. **#41.**
+Célzottan megmérve (#65, `tools/measure-concurrency.sh` 6. és 7. eset):
+
+**Ami NEM reprodukálódik:** a megszüntetett futás runner-gyereke nem tud írni a
+metába. Csak a `CIC_RESULT_JSON`-t írja, amit a halott wrapper már nem olvas
+el. Egy korábbi „megfigyelés" az ellenkezőjét állította — az mérési hiba volt:
+a `$!` az alhéj pid-je, nem a wrapperé, tehát a `kill` árván hagyta a wrappert,
+ami befejezte a munkát. A rossz folyamatot öltem meg.
+
+**Ami reprodukálódik:** az A futás finalizere `error`-ra írja azt az állapotot,
+amit egy újabb B attempt állított be. A finalizer őre (`WE_SET_RUNNING` és
+`status == running`) nem tudja megkülönböztetni B `running`-ját a sajátjától —
+nincs mihez kötnie. Ez a legerősebb közvetlen bizonyíték arra, hogy futás-
+identitás kell. **#41.**
 
 **Evidence:** az `error` commit, az `error_message`, a job-napló.
 
