@@ -192,6 +192,44 @@ check "  a usage.max_turns NEM lett a limit" "0" "$(grep -c 'max-turns 999' "$R/
 rm -rf "$R"
 
 echo
+echo "Az agent-konfiguráció helyét a job mondja meg (#42)"
+# Az agent.config_dir mező a sémában régóta benne volt, minden meta kitöltötte,
+# és a run-job.sh SEHOL nem olvasta — beégetett ~/.claude-personal utat
+# származtatott helyette. Egy dokumentált mező, amit senki nem olvas, hamis
+# konfigurációs felület.
+R=$(mkfactory)
+NONCLAUDE="$R/home/sajat-agent-config"
+mkdir -p "$NONCLAUDE"
+bash "$SRC/meta-set.sh" "$R/repo/jobs/t/meta.yaml" "agent.config_dir=$NONCLAUDE"
+printf '# T\n## Output\n`output/report.md`\n' > "$R/repo/jobs/t/input.md"
+commit_spec "$R"
+check "lefut Claude-alakú könyvtár nélkül" "0" "$(run_job "$R")"
+rm -rf "$R"
+
+echo
+echo "  a nem létező könyvtárnál megnevezi a forrást"
+R=$(mkfactory)
+bash "$SRC/meta-set.sh" "$R/repo/jobs/t/meta.yaml" "agent.config_dir=$R/home/nincs-ilyen"
+printf '# T\n## Output\n`output/report.md`\n' > "$R/repo/jobs/t/input.md"
+commit_spec "$R"
+check "elutasít" "1" "$(run_job "$R")"
+check_run() { grep -c "$1" "$R/run.log"; }
+check "  megnevezi a könyvtárat" "1" "$(grep -c 'nincs-ilyen' "$R/run.log")"
+check "  és hogy honnan jött" "1" "$(grep -c 'meta.yaml agent.config_dir' "$R/run.log")"
+rm -rf "$R"
+
+echo
+echo "  üres mező → az alapértelmezés, és ezt is kimondja"
+R=$(mkfactory)
+bash "$SRC/meta-set.sh" "$R/repo/jobs/t/meta.yaml" 'agent.config_dir='
+rm -rf "$R/home/.claude-personal"
+printf '# T\n## Output\n`output/report.md`\n' > "$R/repo/jobs/t/input.md"
+commit_spec "$R"
+check "elutasít" "1" "$(run_job "$R")"
+check "  az alapértelmezést nevezi meg forrásként" "1" \
+    "$(grep -c 'alapértelmezés' "$R/run.log")"
+rm -rf "$R"
+
 echo "A path határa (#32)"
 # Az exit code itt NEM mér semmit: ellenőrzés nélkül is 1-gyel áll le, csak
 # később és más okból ("Nem létezik: .../jobs/../../X/meta.yaml"). Az első

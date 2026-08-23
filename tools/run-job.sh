@@ -196,7 +196,23 @@ INPUT="$JOB_DIR/input.md"
 WORKSPACE="$JOB_DIR/workspace"
 FACTORY_CLONE="$WORKSPACE/cic-factory"
 FEATURE_BRANCH="feature/$JOB_ID"
-AGENT_CONFIG="$HOME/.claude-personal/agents/$AGENT_ID"
+# Az agent-konfiguráció helyét a JOB mondja meg, ha megmondja.
+#
+# Az `agent.config_dir` mező a sémában régóta benne van, és minden meta kitölti
+# — a run-job.sh viszont SEHOL nem olvasta, hanem egy beégetett útvonalat
+# származtatott (#42). Egy dokumentált mező, amit mindenki ír és senki nem
+# olvas, hamis konfigurációs felület: úgy néz ki, mintha lehetne állítani.
+#
+# Ez nem szünteti meg a Claude-kötést — a fallback továbbra is a
+# ~/.claude-personal alak —, de a döntést a specbe teszi, ahol látszik. A
+# teljes leválasztás (a runner deklarálja a saját igényét) a #42 nyitott fele.
+AGENT_CONFIG=$(bash "$WORKDIR/tools/meta-get.sh" "$META" agent.config_dir 2>/dev/null) || AGENT_CONFIG=""
+if [[ -n "$AGENT_CONFIG" ]]; then
+    AGENT_CONFIG_SOURCE="meta.yaml agent.config_dir"
+else
+    AGENT_CONFIG="$HOME/.claude-personal/agents/$AGENT_ID"
+    AGENT_CONFIG_SOURCE="alapértelmezés (a meta nem adta meg)"
+fi
 # Claude Code slugs a project path by replacing BOTH separators and underscores
 # with dashes. Replacing only '/' silently produced a directory that does not
 # exist for any path containing '_' — here /home/sinkog/sync/claude_factory/...
@@ -208,7 +224,11 @@ SESSION_DIR="$AGENT_CONFIG/projects/$PROJECT_SLUG"
 # --- Ellenőrzések ---
 [[ -f "$META" ]]  || { echo "[ERROR] Nem létezik: $META"; exit 1; }
 [[ -f "$INPUT" ]] || { echo "[ERROR] Nem létezik: $INPUT"; exit 1; }
-[[ -d "$AGENT_CONFIG" ]] || { echo "[ERROR] Agent nem létezik: $AGENT_CONFIG"; exit 1; }
+[[ -d "$AGENT_CONFIG" ]] || {
+    echo "[ERROR] Agent-konfiguráció nem létezik: $AGENT_CONFIG" >&2
+    echo "        Forrás: $AGENT_CONFIG_SOURCE" >&2
+    exit 1
+}
 
 # `set -o pipefail` mellett egy nem illeszkedő grep miatt ez a sor korábban
 # ÜZENET NÉLKÜL megölte a scriptet: a finalizer lefutott, de nem szólt, mert még
