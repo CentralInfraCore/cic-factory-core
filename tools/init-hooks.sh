@@ -17,6 +17,29 @@ fi
 HOOKS_DIR="$GIT_DIR/hooks"
 TOOLS_DIR=$(git rev-parse --show-toplevel)/tools
 
+# core.hooksPath OVERRIDES $GIT_DIR/hooks entirely -- git runs the hook from
+# there and never looks here. Measured (#82): a shared hooks directory outside
+# the repository held a STALE COPY of the signer, so every commit was signed by
+# a version this repository had replaced two releases earlier, and nothing said
+# so. Installing a symlink into $GIT_DIR/hooks would have had no effect at all.
+#
+# The two arrangements are mutually exclusive. Say so instead of installing
+# something that will silently do nothing.
+CONFIGURED_HOOKS_PATH=$(git config --get core.hooksPath || true)
+if [ -n "$CONFIGURED_HOOKS_PATH" ]; then
+    echo "[!] core.hooksPath is set to: $CONFIGURED_HOOKS_PATH"
+    echo "    Git takes hooks from there and IGNORES $HOOKS_DIR."
+    echo "    Installing here would silently do nothing."
+    echo
+    echo "    Pick one:"
+    echo "      git config --unset core.hooksPath   # then re-run this script"
+    echo "      ln -sf \"$TOOLS_DIR/git_hook_commit-msg.sh\" \\"
+    echo "             \"$CONFIGURED_HOOKS_PATH/commit-msg\"   # symlink, not a copy"
+    echo
+    echo "    Verify either way with: bash tools/check-hook-provenance.sh"
+    exit 1
+fi
+
 echo "--- Initializing Git hooks ---"
 
 # Capture the current PATH from the environment where init-hooks.sh is executed
@@ -40,4 +63,15 @@ echo "[*] Symlinking commit-msg hook from tools directory..."
 ln -s -f "../../tools/git_hook_commit-msg.sh" "$COMMIT_MSG_HOOK"
 echo "  ✓ Done."
 
-echo "\nRepository initialization complete. Hooks are set up."
+# A symlink cannot go stale, but a wrapper or a hand-placed copy can. Prove the
+# hook now in effect is the one this repository ships, rather than assuming the
+# install worked.
+echo "[*] Verifying the hook actually in effect..."
+if sh -c 'bash "$0/check-hook-provenance.sh"' "$TOOLS_DIR"; then
+    echo "\nRepository initialization complete. Hooks are set up and verified."
+else
+    echo "\n[!] The hook in effect is NOT the signer this repository ships."
+    echo "    See the output above. Commits made here would carry the wrong"
+    echo "    provenance, or none."
+    exit 1
+fi

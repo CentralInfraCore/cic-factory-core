@@ -130,6 +130,13 @@ jobs:
       - name: commit-msg signer trust boundary
         run: bash tools/test-commit-msg-signer.sh
 
+      # A repó nem azzal a hookkal írt alá, amit kiad: a core.hooksPath egy repón
+      # kívüli megosztott könyvtárra mutatott, benne a signer elavult másolatával
+      # (#82). A CI-ban nincs hook telepítve, ezért itt a CHECKER-t mérjük
+      # fixture-ökkel — a checker maga a fejlesztői gépen fut.
+      - name: the effective hook is the shipped signer
+        run: bash tools/test-check-hook-provenance.sh
+
       # Az aláírás a COMMITHOZ van kötve, nem csak a fához. Mérve (#44): egy A
       # repóban készült blokk átment egy MÁSIK repó MÁSIK commitján. Ez a suite
       # a valódi hookot futtatja valódi git commit-on, és a valódi verifierrel
