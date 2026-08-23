@@ -59,6 +59,11 @@ lease_expires: ""           # written by run-job.sh with the running commit, so 
                             # correcting it. Detectable from the repo alone --
                             # tools/check-stale-jobs.sh -- with no cooperation
                             # from the dead process. Cleared when the run ends.
+run_id: ""                  # a futási kísérlet azonosítója; a running átmenet írja.
+                            # A finalizer ehhez köti az írási jogosultságát: egy
+                            # régi futás nem veheti vissza azt a jobot, amit
+                            # közben egy újabb attempt birtokol.
+attempt: ""                 # hányadik kísérlet; a running átmenet lépteti.
 error_message: ""           # only when status: error
 
 # Usage — written by run-job.sh from `claude --output-format json`.

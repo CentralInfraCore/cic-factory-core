@@ -151,6 +151,12 @@ jobs:
       - name: same-job guard
         run: bash tools/test-same-job-guard.sh
 
+      # Futás-identitás: a finalizer csak azt a jobot veheti vissza error-ba,
+      # amit ő maga állított running-ra. Mérve, hogy enélkül felülírja egy
+      # újabb attempt állapotát.
+      - name: run identity
+        run: bash tools/test-run-identity.sh
+
       # Behaviour, not just syntax. The finalizer suite covers the SIGPIPE/SIGTERM
       # incident; the lifecycle suite covers the transition run-job.sh performs,
       # which the finalizer suite is structurally blind to -- it only extracts the

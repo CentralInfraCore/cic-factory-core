@@ -50,7 +50,15 @@ WORKDIR="$(cd "$(dirname "$0")/.." && pwd)"
 # running. It writes to a log file and to stderr rather than stdout, so it still
 # works when stdout is the closed pipe that caused the exit in the first place.
 FINALIZED=0
-WE_SET_RUNNING=0
+# Ennek a futásnak az azonosítója. A `running` átmenettel kerül a metába, és
+# ehhez köti a finalizer az írási jogosultságát.
+#
+# Mérve (#41, measure-concurrency.sh 7. eset): enélkül az A futás finalizere
+# `error`-ra írta azt az állapotot, amit egy újabb B attempt állított be. Az
+# őr `WE_SET_RUNNING && status == running` volt -- mindkét fele teljesült,
+# mert a `running` ugyanúgy néz ki, bárki írta.
+RUN_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null \
+         || python3 -c 'import uuid; print(uuid.uuid4())')
 AGENT_PID=""
 RUN_LOG=""
 finalize() {
@@ -62,17 +70,26 @@ finalize() {
     # A normal run finalizes inline and sets FINALIZED itself; reaching here with
     # a still-"running" meta means the wrapper is dying early.
     #
-    # WE_SET_RUNNING matters: a meta can already say "running" when this process
-    # starts (a previous stuck run). Declining the "Job már fut. Folytatod?"
-    # prompt must not rewrite someone else's job to error — only a run that put
-    # the status there is allowed to take it back.
+    # Csak az a futás veheti vissza a jobot error-ba, amelyik a running
+    # állapotot odaírta -- és ezt a meta run_id mezője mondja meg, nem egy
+    # lokális boolean. A korábbi őr (`WE_SET_RUNNING && status == running`)
+    # nem tudta megkülönböztetni egy újabb attempt running-ját a sajátjától,
+    # és mérhetően felül is írta (#41).
     # A státusz itt jogosultsági döntés: eldönti, szabad-e visszavennünk a
     # jobot error-ba. Eddig `awk -F'"'` olvasta, ami egy sorvégi kommentnél
     # `running" # x`-et ad -- a finalizer ilyenkor némán nem javított. Ugyanaz
     # az osztály, mint #29/#30, csak itt a mulasztás a hiba.
-    local st
+    local st owner
     st=$(bash "$WORKDIR/tools/meta-get.sh" "${META:-/dev/null}" status 2>/dev/null) || st=""
-    if [[ "$WE_SET_RUNNING" -eq 1 && "$st" == "running" ]]; then
+    owner=$(bash "$WORKDIR/tools/meta-get.sh" "${META:-/dev/null}" run_id 2>/dev/null) || owner=""
+    if [[ "$st" == "running" && -n "$owner" && "$owner" != "$RUN_ID" ]]; then
+        echo "[!] A wrapper idő előtt kilépett (rc=$rc), de a jobot közben egy" >&2
+        echo "    másik futás vette át (run_id=$owner, mienk=$RUN_ID)." >&2
+        echo "    NEM írjuk error-ra: az az ő állapota, nem a miénk." >&2
+        [[ $rc -eq 0 ]] && rc=1
+        exit $rc
+    fi
+    if [[ "$st" == "running" && "$owner" == "$RUN_ID" ]]; then
         local end; end=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
         # A lease a státusz javításával elveszti az értelmét; ott hagyva egy
         # már rendezett job elakadtnak látszana a check-stale-jobs.sh-nak.
@@ -445,13 +462,31 @@ echo "[*] $JOB_ID — running ($NOW)"
 # amire ez a repó épül. Akkor is íródik, ha nem volt kihagyva: a mező hiánya
 # így régi metát jelent, nem tiszta futást.
 SPEC_GATE_VALUE=$([[ "$SKIP_SPEC_GATE" -eq 1 ]] && echo skipped || echo passed)
+
+# Compare-and-swap, amennyire egy fájl fölött lehet: a státuszt közvetlenül az
+# írás előtt újraolvassuk, és csak akkor írunk, ha még az, amire alapoztunk.
+# Ez nem lock -- két folyamat között marad ablak --, de a #66-ban maradt
+# olvasás-írás rést szűkíti, és megnevezi, ha valaki közben megelőzött.
+STATUS_NOW=$(bash "$WORKDIR/tools/meta-get.sh" "$META" status 2>/dev/null) || STATUS_NOW=""
+if [[ "$STATUS_NOW" != "$STATUS" ]]; then
+    echo "[ERROR] A job állapota megváltozott alattunk: '$STATUS' → '$STATUS_NOW'." >&2
+    echo "        Valaki megelőzött; ezt a futást nem indítjuk el." >&2
+    exit 1
+fi
+
+PREV_ATTEMPT=$(bash "$WORKDIR/tools/meta-get.sh" "$META" attempt 2>/dev/null) || PREV_ATTEMPT=""
+case "$PREV_ATTEMPT" in ''|*[!0-9]*) PREV_ATTEMPT=0 ;; esac
+ATTEMPT=$((PREV_ATTEMPT + 1))
+
 bash "$WORKDIR/tools/meta-set.sh" "$META" \
     'status=running' \
     "timestamps.started=$NOW" \
     'timestamps.completed=' \
     "lease_expires=$LEASE_EXPIRES" \
-    "spec_gate=$SPEC_GATE_VALUE"
-WE_SET_RUNNING=1   # from here on, an early exit is ours to clean up
+    "spec_gate=$SPEC_GATE_VALUE" \
+    "run_id=$RUN_ID" \
+    "attempt=$ATTEMPT"
+echo "[*] run_id=$RUN_ID (attempt $ATTEMPT)"
 
 bash "$WORKDIR/tools/update-index.sh"
 git -C "$WORKDIR" add "$META" jobs/index.yaml
@@ -867,6 +902,8 @@ else:
 
 # A lease a futás végén értelmét veszti; ott hagyva egy befejezett job
 # elakadtnak látszana.
+# A run_id a futás végén is bent marad: megmondja, MELYIK kísérlet hagyta ott
+# ezt az állapotot. A lease az, ami elveszti az értelmét.
 out = [("status", status),
        ("lease_expires", ""),
        ("timestamps.completed", end)]
