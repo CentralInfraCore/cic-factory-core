@@ -280,17 +280,22 @@ if [[ -z "$WRAPPER" ]]; then
     verdict "MÉRHETETLEN — nem találom a wrapper folyamatot"
 else
     # B attempt szimulálása: egy ÚJABB futás állítja be az állapotot
+    # Egy VALÓDI B attempt saját run_id-t is ír -- enélkül a szimuláció azt
+    # állítaná, hogy B ugyanaz a futás, mint A, és a mérés semmit nem mondana.
     bash "$CORE/meta-set.sh" "$R/repo/jobs/iota/meta.yaml" \
-        'status=running' 'lease_expires=2099-01-01T00:00:00Z'
-    echo "  szimulált B attempt: status=running, friss lease"
+        'status=running' 'lease_expires=2099-01-01T00:00:00Z' \
+        'run_id=B-ATTEMPT-0000' 'attempt=2'
+    echo "  szimulált B attempt: status=running, friss lease, saját run_id"
     # most öljük meg az A wrappert — a finalizere most fut le
     kill -TERM "$WRAPPER" 2>/dev/null; sleep 1.5
     AFTER=$(status_of "$R" iota)
     echo "  az A finalizerének lefutása után: $AFTER"
+    OWNER=$(bash "$CORE/meta-get.sh" "$R/repo/jobs/iota/meta.yaml" run_id 2>/dev/null)
+    echo "  a meta run_id-je: $OWNER"
     if [[ "$AFTER" == "error" ]]; then
         verdict "REPRODUKÁLT — az A finalizere error-ra írta a B által beállított állapotot"
     else
-        verdict "nem írta felül (a státusz '$AFTER')"
+        verdict "nem írta felül (a státusz '$AFTER') — a finalizer felismerte, hogy nem az övé"
     fi
     touch "$R/go"; kill -TERM "$SUBSHELL" 2>/dev/null; wait "$SUBSHELL" 2>/dev/null
 fi

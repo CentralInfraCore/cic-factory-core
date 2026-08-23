@@ -126,6 +126,17 @@
     "lease_expires": {
       "type": "string"
     },
+    "run_id": {
+      "type": "string",
+      "description": "A jelenlegi futási kísérlet azonosítója. A running átmenet írja. Ehhez köti a finalizer az írási jogosultságát: egy régi futás nem veheti vissza azt a jobot, amit közben egy újabb attempt birtokol."
+    },
+    "attempt": {
+      "type": [
+        "string",
+        "integer"
+      ],
+      "description": "Hányadik kísérlet. Monoton nő; a running átmenet lépteti."
+    },
     "error_message": {
       "type": "string"
     },
