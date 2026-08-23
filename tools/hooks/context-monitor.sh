@@ -97,7 +97,30 @@ get_context_pct() {
         debug_dir="${candidate}/debug"
         [ -d "$debug_dir" ] || continue
 
-        local latest
+        # A forrás kiválasztása eddig tisztán mtime szerint ment: a debug
+        # könyvtár legfrissebb .txt-je, job-kötés nélkül. Két azonos
+        # agent-configon futó job így EGYMÁS context-értékét olvashatta, és a
+        # rossz job kaphatott CRITICAL/EMERGENCY figyelmeztetést (#42).
+        #
+        # A #27 az állapotfájlokat vitte privát könyvtárba; a forrást nem
+        # érintette.
+        #
+        # Nem tippelünk okosabban: ha több fájl is friss, a forrás nem
+        # egyértelmű, és inkább nincs százalék, mint egy másik jobé. A
+        # tool-hívás-alapú becslés amúgy is ott van fallbackként.
+        local latest fresh_count
+        fresh_count=$(find "$debug_dir" -maxdepth 1 -name '*.txt' \
+                      -newermt '-10 minutes' 2>/dev/null | wc -l)
+        if [ "$fresh_count" -gt 1 ]; then
+            # Egy üzenet hívásonként: a ciklus két jelöltet néz meg
+            # (CLAUDE_CONFIG_DIR és ~/.claude), és mindkettőn szólva duplázna.
+            # A gyakoriságot amúgy is a minden-harmadik-hívás kapu fogja.
+            # STDERR: a függvény kimenetét `CONTEXT_PCT=$(get_context_pct)`
+            # fogja fel, tehát a stdout-ra írt üzenet a SZÁZALÉK helyére kerülne.
+            echo "CONTEXT [CIC]: $fresh_count friss debug-log ebben az agent-configban —" >&2
+            echo "  nem eldönthető, melyik ezé a jobé. A context-százalék becsült." >&2
+            return
+        fi
         latest=$(find "$debug_dir" -maxdepth 1 -name '*.txt' -printf '%T@ %p\n' 2>/dev/null \
                  | sort -rn | head -1 | cut -d' ' -f2-)
         [ -z "$latest" ] && continue
