@@ -147,5 +147,28 @@ check "  a hiányzó CA-t nevezi meg" "1" "$(grep -c 'CA certificate not found' 
 rm -rf "$R"
 
 echo
+echo "A hook és a verifier ugyanazt a manifestet számolja (#38)"
+# A hook ÍRJA az aláírt digestet, a verifier ÚJRASZÁMOLJA. Ha a kettő eltér, a
+# saját commitjaink válnának ellenőrizhetetlenné — és külön-külön tesztelve
+# mindkettő zöld lenne.
+#
+# Az előző körben ezt a saját teszt-helperemmel mértem: a hookot mutálva a
+# suite zöld maradt, mert a helper nem a hook volt. Itt a VALÓDI hook fut
+# (hamis curl-lel), és a VALÓDI verifier ellenőrzi.
+R=$(mkenv)
+cp "$SRC/verify-signatures.sh" "$R/repo/tools/" 2>/dev/null || mkdir -p "$R/repo/tools" && cp "$SRC/verify-signatures.sh" "$R/repo/tools/"
+BASE=$(git -C "$R/repo" rev-parse HEAD 2>/dev/null || true)
+if [[ -z "$BASE" ]]; then
+    git -C "$R/repo" add -A >/dev/null 2>&1
+    git -C "$R/repo" commit -q -m init --no-verify >/dev/null 2>&1
+    BASE=$(git -C "$R/repo" rev-parse HEAD)
+fi
+check "a hook manifest-verziót ír a blokkba" "1" \
+    "$(run "$R" >/dev/null; grep -c 'manifest = cic-tree-manifest/v2' "$R/msg.txt")"
+check "  a digest base64-sha256 alakú" "1" \
+    "$(grep -oP '^digest = \K\S+' "$R/msg.txt" | head -1 | base64 -d 2>/dev/null | wc -c | grep -c '^32$')"
+rm -rf "$R"
+
+echo
 echo "$pass PASS, $fail FAIL"
 [[ "$fail" -eq 0 ]]

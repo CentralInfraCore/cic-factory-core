@@ -359,11 +359,15 @@ verify-signatures.sh → a commit üzenetéből a signing blokk
 **Postcondition:** a repository snapshotjának digestje reprodukálható, és az
 aláírás érvényes a beágyazott tanúsítvány kulcsával.
 
-**Amit NEM állít:** az aláírt payload a `git archive` szerinti fát tartalmazza —
-nem a commit OID-t, a szülőket, a branchet, a taget, sem a lifecycle-jelentést.
-A submodule commitok teljesen kimaradnak belőle, ami mérve is van: két különböző
-fa azonos aláírást adott (#38). A teljes proof-profil és az önálló verifier a
-**#44**.
+**Amit NEM állít:** az aláírt payload a fát tartalmazza — nem a commit OID-t, a
+szülőket, a branchet, a taget, sem a lifecycle-jelentést.
+
+A submodule-kollízió lezárva (#38): a `cic-tree-manifest/v2` a Git fáját írja le
+közvetlenül, minden bejegyzés mode, típus, OID és path — a gitlink is. A régi,
+tar-alapú aláírások továbbra is ellenőrizhetők; a verifier a blokkban álló
+manifest-verzió szerint dönt.
+
+A commit identitásának kötése és az önálló verifier a **#44**.
 
 **Evidence:** a `verify-signatures.sh` kimenete, reason code-okkal.
 
