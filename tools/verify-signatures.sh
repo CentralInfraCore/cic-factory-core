@@ -93,6 +93,48 @@ manifest_digest_v2() {
     } | openssl dgst -sha256 -binary | openssl base64 -A
 }
 
+# cic-tree-manifest/v3: a fa MELLETT a commit kontextusát is köti.
+#
+# A v2 aláírás átültethető volt: egy A repóban készült blokk átment egy MÁSIK
+# repó MÁSIK commitján, más üzenettel, mert csak a fa volt aláírva (#44).
+#
+# A commit OID-t a hook nem tudja bekötni -- a commit még nem létezik, amikor
+# fut. A szerző, a committer és az üzenet viszont ismertek, és együtt zárják az
+# átültetést.
+#
+# A remote URL és a SZÜLŐK szándékosan kimaradnak. A remote URL környezeti
+# állapot (SSH/HTTPS/mirror mind más). A szülők azért nem, mert a hook a commit
+# előtt fut: `--amend`-nél a HEAD nem az új commit szülője, a `git rebase` pedig
+# nem futtatja újra a hookot, csak átviszi a régi blokkot egy új szülő alá --
+# mindkettő mérve. Ebben a projektben a rebase minden PR előtt kötelező.
+manifest_digest_v3() {
+    local c="$1" tree author committer msg_sha
+    tree=$(git rev-parse "$c^{tree}")
+    author=$(git log -1 --format='%an <%ae>' "$c")
+    committer=$(git log -1 --format='%cn <%ce>' "$c")
+    # Az üzenet a signing blokk NÉLKÜL. A blokkot az UTOLSÓ olyan `---` sornál
+    # vágjuk le, amit `[signing-metadata]` követ -- egy sima `sed '/^---$/,$d'`
+    # levágta volna a felhasználó saját `---` elválasztóját is, és a commitja
+    # ellenőrizhetetlenné vált volna anélkül, hogy bármi baja lenne.
+    local body
+    body=$(git log -1 --format=%B "$c" | awk '
+        { line[NR] = $0; if ($0 == "---" && cut == 0) start = NR }
+        $0 == "[signing-metadata]" && start == NR - 1 { cut = start }
+        END { last = (cut ? cut - 1 : NR); for (i = 1; i <= last; i++) print line[i] }')
+    # Ugyanaz a két normalizálás, mint a hookban: komment-strip és a záró
+    # újsorok levágása a $( ) által.
+    body=$(printf '%s\n' "$body" | git stripspace --strip-comments)
+    msg_sha=$(printf '%s' "$body" | openssl dgst -sha256 -binary | openssl base64 -A)
+    { printf 'cic-tree-manifest/v3\n'
+      printf 'object-format: %s\n' "$(git rev-parse --show-object-format 2>/dev/null || echo sha1)"
+      printf 'author: %s\n' "$author"
+      printf 'committer: %s\n' "$committer"
+      printf 'message-sha256: %s\n' "$msg_sha"
+      printf 'tree: %s\n' "$tree"
+      git ls-tree -r -t "$tree" | LC_ALL=C sort
+    } | openssl dgst -sha256 -binary | openssl base64 -A
+}
+
 # Returns the umask that reproduces $2, or empty.
 matching_umask() {
     local tree="$1" want="$2" m
@@ -118,6 +160,16 @@ verify_commit() {
     local manifest mask
     manifest=$(grep -oP '^manifest = \K\S+' <<<"$msg" | head -1)
     case "$manifest" in
+        cic-tree-manifest/v3)
+            if [[ "$(manifest_digest_v3 "$c")" != "$rec" ]]; then
+                echo "    a digest NEM erre a commitra illik (v3 manifest)"
+                echo "      rögzített:   ${rec:0:32}…"
+                echo "      újraszámolt: $(manifest_digest_v3 "$c" | cut -c1-32)…"
+                echo "      A v3 a fán túl a szerzőt, a committert és az üzenetet"
+                echo "      is köti — ezek bármelyike eltérhet."
+                return 1
+            fi
+            ;;
         cic-tree-manifest/v2)
             if [[ "$(manifest_digest_v2 "$c^{tree}")" != "$rec" ]]; then
                 echo "    a digest NEM a saját fájára illik (v2 manifest)"

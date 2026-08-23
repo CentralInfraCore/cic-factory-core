@@ -344,7 +344,7 @@ magban van. **#42.**
 
 ### UC-08 — Proof és offline verifikáció
 
-**Státusz:** `részleges` — a bizonyíték nem köti a commit identitását (#38, #44)
+**Státusz:** `részleges` — a bizonyíték a commit kontextusát köti, az OID-jét nem (#44)
 
 **Precondition:** a commitok Vault-aláírással készültek.
 
@@ -352,24 +352,48 @@ magban van. **#42.**
 
 ```
 verify-signatures.sh → a commit üzenetéből a signing blokk
-                     → a tree digest újraszámítása
+                     → a manifest-verzió szerinti digest újraszámítása
                      → ECDSA-ellenőrzés a beágyazott certtel
 ```
 
-**Postcondition:** a repository snapshotjának digestje reprodukálható, és az
-aláírás érvényes a beágyazott tanúsítvány kulcsával.
-
-**Amit NEM állít:** az aláírt payload a fát tartalmazza — nem a commit OID-t, a
-szülőket, a branchet, a taget, sem a lifecycle-jelentést.
+**Postcondition:** a digest reprodukálható, és az aláírás érvényes a beágyazott
+tanúsítvány kulcsával.
 
 A submodule-kollízió lezárva (#38): a `cic-tree-manifest/v2` a Git fáját írja le
-közvetlenül, minden bejegyzés mode, típus, OID és path — a gitlink is. A régi,
-tar-alapú aláírások továbbra is ellenőrizhetők; a verifier a blokkban álló
-manifest-verzió szerint dönt.
+közvetlenül, minden bejegyzés mode, típus, OID és path — a gitlink is.
 
-A commit identitásának kötése és az önálló verifier a **#44**.
+Az átültethetőség lezárva (#44). A v2 **csak a fát** kötötte, és ez mérve is
+kihasználható volt: egy A repóban készült aláírt blokk változtatás nélkül átment
+egy MÁSIK repó MÁSIK commitján, MÁS üzenettel, mert a két fa azonos volt — a
+verifier GO-t adott rá. A `cic-tree-manifest/v3` a fa mellé beköti a **szerzőt,
+a committert és az üzenet digestjét**.
 
-**Evidence:** a `verify-signatures.sh` kimenete, reason code-okkal.
+Két kézenfekvő mező szándékosan **kimarad**, mindkettő mérés után:
+
+- **remote URL** — környezeti állapot, nem commit-állapot. Ugyanaz a repó SSH-n
+  és HTTPS-en más URL-t ad, egy mirror harmadikat, egy remote nélküli másolat
+  semmit. Mind legitim, és mind hamis elutasítást kapott volna.
+- **szülők** — a hook a commit *előtt* fut, tehát csak a HEAD-et látja.
+  `--amend`-nél az új commit szülője a HEAD **szülője**, nem a HEAD: a kötés a
+  saját commitján bukott el elsőként. A `git rebase` pedig nem futtatja újra ezt
+  a hookot (mérve), csak átviszi a régi blokkot egy új szülő alá. Ebben a
+  projektben a rebase minden PR előtt kötelező.
+
+**Amit NEM állít:** a **commit OID-t** a payload nem tartalmazza, és tartalmazni
+sem tudja: a `commit-msg` hook akkor fut, amikor a commit még nem létezik. A
+szülők, a branch, a tag és a lifecycle-jelentés szintén nincsenek bekötve. A
+committer *dátuma* nincs kötve — csak a neve és e-mail címe.
+
+**Fa-kötés és rebase:** egy rebase, ami ténylegesen új alap fölé viszi az ágat,
+megváltoztatja a commit fáját is, és így érvényteleníti az aláírását. Ez **nem**
+v3-tulajdonság: a v1 és a v2 ugyanígy viselkedik, mert mindkettő a fát köti.
+
+A v1 (tar-alapú) és a v2 aláírások továbbra is ellenőrizhetők; a verifier a
+blokkban álló manifest-verzió szerint dönt, ismeretlen verziót pedig elutasít.
+
+**Evidence:** a `verify-signatures.sh` kimenete reason code-okkal, és a
+`tools/test-proof-binding.sh` — ami a VALÓDI hookot futtatja valódi
+`git commit`-on, és a VALÓDI verifierrel olvassa vissza.
 
 ---
 

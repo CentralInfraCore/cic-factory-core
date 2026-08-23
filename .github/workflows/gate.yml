@@ -130,6 +130,13 @@ jobs:
       - name: commit-msg signer trust boundary
         run: bash tools/test-commit-msg-signer.sh
 
+      # Az aláírás a COMMITHOZ van kötve, nem csak a fához. Mérve (#44): egy A
+      # repóban készült blokk átment egy MÁSIK repó MÁSIK commitján. Ez a suite
+      # a valódi hookot futtatja valódi git commit-on, és a valódi verifierrel
+      # ellenőriz — a régi "round-trip" szakasz a verifiert el sem indította.
+      - name: the signature is bound to the commit
+        run: bash tools/test-proof-binding.sh
+
       # A prompt és a path határa: mi kerülhet be az input.md-ből a modellhez,
       # és milyen alakú azonosítóból épülhet törölhető útvonal.
       - name: prompt and path boundaries
