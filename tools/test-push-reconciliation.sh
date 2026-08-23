@@ -70,13 +70,18 @@ PY
 advance_remote() {
     local r="$1" what="${2:-idegen}"
     rm -rf "$r/other"
-    git clone -q "$r/remote.git" "$r/other"
+    git clone -q -b main "$r/remote.git" "$r/other"
     git -C "$r/other" config user.email o@o; git -C "$r/other" config user.name o
     git -C "$r/other" config commit.gpgsign false
     mkdir -p "$r/nohooks2"; git -C "$r/other" config core.hooksPath "$r/nohooks2"
     printf '%s\n' "$what" > "$r/other/OTHER.txt"
     git -C "$r/other" add -A >/dev/null; git -C "$r/other" commit -qm "másik checkout"
     git -C "$r/other" push -q origin main
+    # ŐR: ha a remote nem ment előre, a következő esetek nem a push-elutasítást
+    # mérnék, hanem egy zavartalan futást — és némán átmennének.
+    if ! git -C "$r/repo" ls-remote origin main | grep -qv "$(git -C "$r/repo" rev-parse main)"; then
+        echo "  HARNESS-HIBA: a remote nem ment előre" >&2; return 1
+    fi
 }
 run_job() {
     local r="$1"
@@ -101,7 +106,8 @@ rm -rf "$R"
 echo
 echo "A remote előrement közben — csak idegen path-on (#64)"
 # Ez az eset, ami EGY orchestrátorral is megtörténik.
-R=$(mkfactory); advance_remote "$R"
+R=$(mkfactory)
+advance_remote "$R" || { echo "  (a harness nem tudta előrevinni a remote-ot)"; fail=$((fail+1)); }
 check "a job mégis lefut" "0" "$(run_job "$R")"
 check "  helyi státusz" "awaiting_review" "$(status_local "$R")"
 check "  ÉS a remote is látja" "awaiting_review" "$(status_remote "$R")"
@@ -115,7 +121,7 @@ echo "A jobot alattunk átállították → nem egyeztetünk, megállunk"
 # Ha a saját jobunk állapota változott a remoten, már nem mi birtokoljuk az
 # átmenetet. A rebase csak elfedné.
 R=$(mkfactory)
-rm -rf "$R/other"; git clone -q "$R/remote.git" "$R/other"
+rm -rf "$R/other"; git clone -q -b main "$R/remote.git" "$R/other"
 git -C "$R/other" config user.email o@o; git -C "$R/other" config user.name o
 git -C "$R/other" config commit.gpgsign false
 mkdir -p "$R/nohooks2"; git -C "$R/other" config core.hooksPath "$R/nohooks2"
