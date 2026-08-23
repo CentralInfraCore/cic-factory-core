@@ -135,6 +135,12 @@ jobs:
       - name: prompt and path boundaries
         run: bash tools/test-run-job-boundaries.sh
 
+      # A remote a bizalom forrása: egy elutasított push eddig helyben hagyta a
+      # futást, és a remote azt mutatta, ami korábban volt. Ehhez nem kell két
+      # job — egy job plusz bármilyen más push a main-re elég.
+      - name: push reconciliation
+        run: bash tools/test-push-reconciliation.sh
+
       # Behaviour, not just syntax. The finalizer suite covers the SIGPIPE/SIGTERM
       # incident; the lifecycle suite covers the transition run-job.sh performs,
       # which the finalizer suite is structurally blind to -- it only extracts the

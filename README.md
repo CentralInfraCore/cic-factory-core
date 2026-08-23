@@ -149,6 +149,7 @@ drifts:
 | `tools/test-update-index.sh` | that the generated index says what the metas say — the right field from the right section, a status with a trailing comment read cleanly, a job stuck past its lease flagged, and an unreadable meta listed rather than dropped (25 checks) |
 | `tools/test-commit-msg-signer.sh` | that the signer refuses rather than downgrading — no CA, a non-https endpoint, no token, an unreachable Vault — and that the token reaches curl through a 0600 config file, never the process list (25 checks) |
 | `tools/test-run-job-boundaries.sh` | that an exported secret named in `input.md` never reaches the prompt, that `$ref`/`$schema` in a spec are left alone instead of being blanked, and that an identifier which would build a path outside `jobs/` is refused before anything is deleted, that a `kb_focus` list is read whatever quoting it uses, and and that a variable which is set but not allowlisted is reported rather than silently left literal (46 checks) |
+| `tools/test-push-reconciliation.sh` | that a rejected push is reconciled rather than swallowed — the remote moved on an unrelated path, the job was reassigned underneath, and the message that used to claim the feature branch was pushed no matter what (19 checks) |
 
 Every step was measured against a deliberately broken copy before it landed,
 because a gate that cannot go red is decoration. That measurement is not a

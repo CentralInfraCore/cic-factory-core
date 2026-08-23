@@ -190,7 +190,11 @@ SESSION_DIR="$AGENT_CONFIG/projects/$PROJECT_SLUG"
 # ÜZENET NÉLKÜL megölte a scriptet: a finalizer lefutott, de nem szólt, mert még
 # nem mi állítottuk running-ra. Egy hiányzó vagy szokatlan alakú status-sor így
 # néma exit 1 volt.
-STATUS=$(grep '^status:' "$META" | head -1 | sed 's/^status:[[:space:]]*//; s/^"//; s/"$//' || true)
+# Ez az utolsó regexes státuszolvasó volt a fájlban: a #40 söprése kihagyta,
+# mert nem Python-blokkban áll. Épp az „ez a job már fut" őrt táplálja, tehát
+# egy `status: running # agent-01` sor mellett az őr NEM tüzelt volna --
+# ugyanaz a bypass, amit a #29/#30 máshol lezárt.
+STATUS=$(bash "$WORKDIR/tools/meta-get.sh" "$META" status 2>/dev/null) || STATUS=""
 if [[ -z "$STATUS" ]]; then
     echo "[ERROR] Nem olvasható ki a status a $META-ból." >&2
     echo "        Várt alak a sor elején: status: \"pending\"" >&2
@@ -302,6 +306,63 @@ NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 LEASE_HOURS="${CIC_JOB_LEASE_HOURS:-6}"
 LEASE_EXPIRES=$(date -u -d "+${LEASE_HOURS} hours" +"%Y-%m-%dT%H:%M:%SZ")
 
+# A remote a bizalom forrása: a `running` állapot azért megy ki a remote-ra az
+# agent indulása ELŐTT, hogy egy halott wrapper ne tudjon eltitkolni egy futó
+# jobot. Egy csendben elbukó push ezt megtöri -- a remote azt mutatja, ami
+# korábban volt, és a lease sem ért ki.
+#
+# Mérve (2026-08-23, #64): két külön checkoutból a második push
+# non-fast-forward hibával elutasításra kerül, a job `error` lesz, és a helyi
+# main olyan lifecycle-állapottal marad előrébb, amiről a remote nem tud.
+# Ehhez NEM kell két job: egy job plusz bármilyen más push a main-re elég.
+#
+# Az újrapróbálás önmagában nem lenne helyes. Előbb el kell dönteni, hogy MI
+# birtokoljuk-e még az átmenetet, amit publikálni akarunk.
+push_lifecycle() {   # <a job elvárt távoli státusza a push ELŐTT>
+    local expect="$1" err="$WORKDIR/.push-err.$$"
+    if git -C "$WORKDIR" push -q 2>"$err"; then rm -f "$err"; return 0; fi
+
+    if ! grep -qiE 'rejected|non-fast-forward|fetch first' "$err"; then
+        echo "[!] A push nem elutasítás miatt bukott el:" >&2
+        sed 's/^/    /' "$err" >&2; rm -f "$err"; return 1
+    fi
+    echo "[*] A push elutasítva — a remote előrement. Egyeztetés..." >&2
+    rm -f "$err"
+
+    if ! git -C "$WORKDIR" fetch -q origin main; then
+        echo "[!] A fetch sem sikerült; a lifecycle-állapot helyben maradt." >&2
+        return 1
+    fi
+
+    # A saját jobunk állapota változott-e alattunk? Ha igen, már nem mi
+    # birtokoljuk ezt az átmenetet, és a rebase csak elfedné.
+    local remote_meta="$WORKDIR/.remote-meta.$$" remote_status=""
+    if git -C "$WORKDIR" show "origin/main:jobs/$JOB_ID/meta.yaml" > "$remote_meta" 2>/dev/null; then
+        remote_status=$(bash "$WORKDIR/tools/meta-get.sh" "$remote_meta" status 2>/dev/null) || remote_status=""
+    fi
+    rm -f "$remote_meta"
+
+    if [[ -n "$remote_status" && "$remote_status" != "$expect" ]]; then
+        echo "[!] A jobot alattunk átállították: a remote '$remote_status'-t mond," >&2
+        echo "    mi '$expect'-re alapoztunk. Ezt az átmenetet már nem mi birtokoljuk." >&2
+        echo "    A helyi commit megmarad; kézzel kell eldönteni, mi legyen vele." >&2
+        return 1
+    fi
+
+    # Csak idegen path-ok mozdultak: a commitot újraalkotjuk a friss remote-ra.
+    if ! git -C "$WORKDIR" rebase -q origin/main >/dev/null 2>&1; then
+        git -C "$WORKDIR" rebase --abort >/dev/null 2>&1 || true
+        echo "[!] A rebase nem ment automatikusan — ütköző változás a remote-on." >&2
+        return 1
+    fi
+    if git -C "$WORKDIR" push -q; then
+        echo "[*] Egyeztetve és kipusholva." >&2
+        return 0
+    fi
+    echo "[!] A push a második kísérletre sem sikerült." >&2
+    return 1
+}
+
 # --- pending → running ---
 echo "[*] $JOB_ID — running ($NOW)"
 # A `^\s+started:` és `^\s+completed:` minták nem voltak szekcióhoz kötve:
@@ -324,7 +385,8 @@ WE_SET_RUNNING=1   # from here on, an early exit is ours to clean up
 bash "$WORKDIR/tools/update-index.sh"
 git -C "$WORKDIR" add "$META" jobs/index.yaml
 git -C "$WORKDIR" commit -m "job: $JOB_ID — running"
-git -C "$WORKDIR" push
+# A push ELŐTT a remote még a futás előtti állapotot mutatja a jobra.
+push_lifecycle "$STATUS"
 
 # Az input.md-t eddig egy csupasz `envsubst` futtatta, ami a wrapper TELJES
 # környezetét behelyettesíti. Két külön baj:
@@ -761,11 +823,19 @@ bash "$WORKDIR/tools/meta-set.sh" "$META" "${META_ASSIGNMENTS[@]}"
 bash "$WORKDIR/tools/update-index.sh"
 git -C "$WORKDIR" add "$META" jobs/index.yaml
 git -C "$WORKDIR" commit -m "job: $JOB_ID — $NEW_STATUS"
-git -C "$WORKDIR" push
+# Ekkor a remote azt kell mutassa, amit mi tettünk ki: running.
+push_lifecycle "running"
 
 FINALIZED=1   # the normal path recorded the status itself; the trap must not override it
 echo "[✓] Kész: $JOB_ID — $NEW_STATUS"
-echo "[*] Feature branch pusholt: $FEATURE_BRANCH"
+# Ezt eddig feltétel nélkül kiírta. Ha a push nem ment át, a mondat hamis volt,
+# és épp akkor, amikor a legfontosabb lett volna tudni róla.
+if git -C "$FACTORY_CLONE" ls-remote --exit-code --heads origin "$FEATURE_BRANCH" >/dev/null 2>&1; then
+    echo "[*] Feature branch pusholt: $FEATURE_BRANCH"
+else
+    echo "[!] A feature branch NINCS a remoten: $FEATURE_BRANCH" >&2
+    echo "    Az agent munkája csak helyben van meg: $FACTORY_CLONE" >&2
+fi
 echo "[*] Review: gh pr create --head $FEATURE_BRANCH"
 if [[ "$NEW_STATUS" == "error" ]]; then
     echo "[*] Folytatás ugyanebben a session-ben: ./tools/run-job.sh $JOB_ID $AGENT_ID --resume"
