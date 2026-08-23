@@ -211,6 +211,7 @@ own tree.
 
 | tag | jegyzet |
 |---|---|
+| `core/@v0.3.0` | [docs/RELEASE-0.3.0.md](docs/RELEASE-0.3.0.md) — M1 through measurement. **The close now commits, and a review must name its run** |
 | `core/@v0.2.1` | [docs/RELEASE-0.2.1.md](docs/RELEASE-0.2.1.md) — fixes three failures that only appear in an *adopting* repository. **Adopt this, not v0.2.0** |
 | `core/@v0.2.0` | [docs/RELEASE-0.2.0.md](docs/RELEASE-0.2.0.md) — an audit carried through; M0 complete. **Adopting it needs a `tools/env.sh` change** |
 | `core/@v0.1.0` | [docs/RELEASE-0.1.0.md](docs/RELEASE-0.1.0.md) — the first release |
