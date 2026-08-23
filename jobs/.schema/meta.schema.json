@@ -137,6 +137,14 @@
       ],
       "description": "Hányadik kísérlet. Monoton nő; a running átmenet lépteti."
     },
+    "result_digest": {
+      "type": "string",
+      "description": "A lezáráskor validált tartalom (output/ + review.md) sha256 lenyomata. A close írja. Ebből utólag eldönthető, hogy a done commit azt hordozza-e, amit a kapu látott."
+    },
+    "reviewed_run_id": {
+      "type": "string",
+      "description": "Melyik futás eredményét zárta le a close. A review-ban megnevezett run_id-vel egyezik."
+    },
     "error_message": {
       "type": "string"
     },

@@ -40,7 +40,7 @@ mkjob() {
     local root="$1" status="$2" spec_gate="${3-}"
     mkdir -p "$root/tools" "$root/jobs/t/output"
     cp "$SRC/close-job.sh" "$SRC/validate-output.sh" "$SRC/update-index.sh" \
-       "$SRC/meta-get.sh" "$root/tools/"
+       "$SRC/meta-get.sh" "$SRC/meta-set.sh" "$root/tools/"
     cat > "$root/jobs/t/input.md" <<'EOF'
 # Teszt job
 ## Output
@@ -220,6 +220,48 @@ check "  a státusz done" "done" "$(status_of "$T")"
 grep -qE '^\s+completed: "20' "$T/jobs/t/meta.yaml" && { echo "  PASS  completed timestamp kitöltve"; ((pass++)); } \
     || { echo "  FAIL  completed üres"; ((fail++)); }
 check "másodszor már elutasít (a done nem awaiting_review)" "1" "$(run_close "$T")"
+rm -rf "$T"
+
+echo
+echo "C6 — a review nevezze meg, melyik futást nézte (#43)"
+# Mérve: egy 2. attempt lezárult az 1. attempt review-jával. A close a fájlok
+# meglétét nézte, nem azt, melyik futáshoz tartoznak.
+T=$(mktemp -d); mkjob "$T" awaiting_review
+bash "$SRC/meta-set.sh" "$T/jobs/t/meta.yaml" 'run_id=RUN-AAA' 'attempt=1'
+printf '# Review\n## Amit ellenőriztem\n- ok\n' > "$T/jobs/t/review.md"
+check "run_id nélküli review → elutasít" "1" "$(run_close "$T")"
+check_reason "  a C6-ot nevezi meg" "C6" "$T/out.log"
+check_reason "  kiírja a futás azonosítóját" "RUN-AAA" "$T/out.log"
+check "  a státusz érintetlen" "awaiting_review" "$(status_of "$T")"
+rm -rf "$T"
+
+echo
+echo "  a MÁSIK attempt review-ja sem elég"
+T=$(mktemp -d); mkjob "$T" awaiting_review
+bash "$SRC/meta-set.sh" "$T/jobs/t/meta.yaml" 'run_id=RUN-BBB' 'attempt=2'
+printf '# Review\nrun_id: RUN-AAA\n## Amit ellenőriztem\n- ok\n' > "$T/jobs/t/review.md"
+check "elutasít" "1" "$(run_close "$T")"
+check_reason "  a C6-ot nevezi meg" "C6" "$T/out.log"
+rm -rf "$T"
+
+echo
+echo "  a SAJÁT futás review-ja átmegy, és rögzül a kötés"
+T=$(mktemp -d); mkjob "$T" awaiting_review
+bash "$SRC/meta-set.sh" "$T/jobs/t/meta.yaml" 'run_id=RUN-BBB' 'attempt=2'
+printf '# Review\nrun_id: RUN-BBB\n## Amit ellenőriztem\n- ok\n' > "$T/jobs/t/review.md"
+check "átmegy" "0" "$(run_close "$T")"
+check "  a státusz done" "done" "$(status_of "$T")"
+check "  reviewed_run_id rögzítve" "RUN-BBB" "$(bash "$SRC/meta-get.sh" "$T/jobs/t/meta.yaml" reviewed_run_id)"
+check "  result_digest rögzítve (sha256)" "1" \
+    "$(bash "$SRC/meta-get.sh" "$T/jobs/t/meta.yaml" result_digest | grep -cE '^[0-9a-f]{64}$')"
+rm -rf "$T"
+
+echo
+echo "  run_id nélküli meta (a mező bevezetése előtti job) → figyelmeztet, átenged"
+T=$(mktemp -d); mkjob "$T" awaiting_review
+printf '# Review\n## Amit ellenőriztem\n- ok\n' > "$T/jobs/t/review.md"
+check "átmegy" "0" "$(run_close "$T")"
+check_reason "  de kimondja, hogy nem igazolható" "nincs run_id" "$T/out.log"
 rm -rf "$T"
 
 echo

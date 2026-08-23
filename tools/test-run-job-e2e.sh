@@ -128,7 +128,10 @@ echo "3. Output-kapu és review után lezárható"
 # file:line hívási pontot vagy deadcode kimenetet. Ez is a kapu helyes működése.
 printf '# Riport\n| Állítás | Státusz | Bizonyíték | Verifikációs módszer | Kockázat |\n|---|---|---|---|---|\n| ok | igazolt | tools/run-job.sh:1 | újrafuttatható | alacsony |\n' \
     > "$R/repo/jobs/t/output/report.md"
-printf '# Review\n## Amit ellenőriztem\n- a kapu zöld\n' > "$R/repo/jobs/t/review.md"
+# A review-nak meg kell neveznie a futást, amit nézett (C6, #43) — enélkül nem
+# eldönthető, hogy ehhez az attempthez készült-e, vagy egy korábbihoz.
+printf '# Review\nrun_id: %s\n## Amit ellenőriztem\n- a kapu zöld\n' \
+    "$(field "$R" run_id)" > "$R/repo/jobs/t/review.md"
 RC2=$(CLOSE)
 [[ "$RC2" != "0" ]] && { echo "  --- close.log ---"; sed 's/^/      /' "$R/close.log" | tail -12; }
 check "close-job.sh átmegy" "0" "$RC2"

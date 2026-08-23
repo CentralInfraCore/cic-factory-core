@@ -187,7 +187,7 @@ identitás kell. **#41.**
 
 ### UC-04 — Review és close
 
-**Státusz:** `részleges` — a review nincs eredményhez kötve (#43)
+**Státusz:** `részleges` — a kötés a run_id-n áll, nem result ref-en (#44)
 
 **Precondition:** a job `awaiting_review`, van `review.md` és van `output/`.
 
@@ -199,16 +199,24 @@ close-job.sh → C1  van meta.yaml
              → C3  validate-output.sh GO               (O1–O5)
              → C4  review.md létezik és nem üres
              → C5  ha spec_gate=skipped, a review elismeri
+             → C6  a review megnevezi a futást, amit nézett (run_id)
              → meta-set: status=done
 ```
 
 **Postcondition:** minden `done` úton lefutott az output-kapu, és van review
 artifact. Nincs olyan dokumentált út, ahol a `done` ezek nélkül elérhető.
 
-**Amit még nem garantál:** a review és az output nincs immutable result
-ref-hez kötve. Egy új attempt lezárható a korábbi review-jával, mert a
-`close-job.sh` a fájlok meglétét nézi, nem azt, hogy melyik futáshoz
-tartoznak. **#43.**
+**Mérve és lezárva (#43):** a review-nak meg kell neveznie a `run_id`-t, amit
+nézett (C6), a close rögzíti a `reviewed_run_id`-t és a validált tartalom
+`result_digest`-jét, és **azt commitolja, amit validált** — a validáció és a
+commit között eddig kicserélhető volt az output, és a `done` commit olyan
+tartalmat vitt, amit a kapu soha nem látott.
+
+**Amit még nem garantál:** a kötés a `run_id`-n áll, nem immutable result
+ref-en. A feature branch SHA-ja nincs rögzítve, tehát a `done` commitból az
+látszik, MELYIK futás eredményét zárták le, az nem, hogy az az eredmény melyik
+commitban él. **#43** lezárva, a teljesebb kötés a **#44** proof-profiljával
+jön.
 
 **Evidence:** a `done` commit, a `review.md`, az output-kapu kimenete.
 
@@ -424,7 +432,7 @@ Ezek a feature branch-re kerülnek. Merge után az orchestrátor a live
 | `tools/validate-spec.sh <job-id>` | Gépi kapu indítás előtt (K1, K3, K4, K7, K7b, K8, K9, K10, K11). NO-GO → az agent nem indulhat |
 <!-- A /job-validate kézi listája ennél hosszabb: megítélési kérdéseket is tartalmaz, amiket nem dönt el grep. Azok ott vannak felsorolva, kéziként jelölve. -->
 | `tools/validate-output.sh <job-id>` | Gépi kapu lezárás előtt (O1–O5) |
-| `tools/close-job.sh <job-id>` | **Az egyetlen `awaiting_review → done` átmenet** (C1–C5). `--dry-run` csak ellenőriz |
+| `tools/close-job.sh <job-id>` | **Az egyetlen `awaiting_review → done` átmenet** (C1–C6). `--dry-run` csak ellenőriz |
 | `tools/check-stale-jobs.sh` | Kilistázza a `running`-ot állító jobokat, amelyek lease-e lejárt |
 | `tools/update-index.sh` | `jobs/index.yaml` újragenerálása |
 | `tools/install-claude-hooks.sh [agent-id]` | Agent hookok telepítése; idempotens |
@@ -434,7 +442,7 @@ Ezek a feature branch-re kerülnek. Merge után az orchestrátor a live
 
 ```
 spec → validate-spec.sh → agent fut → validate-output.sh → review.md → close-job.sh → done
-     (K1,K3,K4,K7,K7b,               (O1–O5)                          (C1–C5)
+     (K1,K3,K4,K7,K7b,               (O1–O5)                          (C1–C6)
       K8,K9,K10,K11)
 ```
 
