@@ -332,8 +332,11 @@ lezárás ugyanúgy a `close-job.sh`-n megy át, tehát a `validate-output.sh`
 output-kapuján és a `review.md` meglétén is. Egy runner nem tud olyan utat
 nyitni, ami ezeket megkerüli.
 
-**Amit még nem garantál:** a session-folytatás nem köti magát futás-identitáshoz
-(#42), és a Claude-specifikus mezők még a `meta.yaml`-ben élnek.
+**Amit még nem garantál:** a `--resume` egyáltalán nem része a runner-
+szerződésnek: Claude session-jsonl-t vár, tehát egy másik executor nem tudná
+implementálni. Az agent-konfiguráció helyét mostantól a job mondja meg
+(`agent.config_dir`), de a fallback és a session-elrendezés ismerete még a
+magban van. **#42.**
 
 **Evidence:** a runner JSON-ja, az `agent-output-*.md`, a `usage` blokk.
 

@@ -56,15 +56,35 @@ run_job() { local r="$1"; shift
     ( cd "$r/repo" && env HOME="$r/home" CIC_AGENT_RUNNER=echo \
         bash tools/run-job.sh t agent-01 --skip-spec-gate "$@" </dev/null ) >"$r/run.log" 2>&1; echo $?; }
 
-say "1. Fut-e a mag Claude agent-config NÉLKÜL, echo runnerrel?"
+say "1. A job megmondhatja-e, hol az agent-konfigurációja?"
+# Korábban nem: a mag beégetett ~/.claude-personal/agents/<id> utat származtatott,
+# és e nélkül nem indult el, akkor sem, ha nem Claude futott. Az agent.config_dir
+# mező a sémában benne volt, minden meta kitöltötte, és senki nem olvasta.
 R=$(mkfactory no)
+NONCLAUDE="$R/home/sajat-agent-config"
+mkdir -p "$NONCLAUDE"
+bash "$SRC/meta-set.sh" "$R/repo/jobs/t/meta.yaml" "agent.config_dir=$NONCLAUDE"
+rc=$(run_job "$R")
+echo "  a meta ide mutat: $NONCLAUDE  (semmi Claude-alak)"
+echo "  exit=$rc"
+if [[ "$rc" -eq 0 ]]; then
+    verdict "a job megmondja, hol a configja — a mag nem követel Claude-könyvtárat"
+else
+    grep -m2 'ERROR' "$R/run.log" | sed 's/^/     /'
+    verdict "REPRODUKÁLT — a mag akkor sem indul, ha a job megmondja, hol a configja"
+fi
+rm -rf "$R"
+
+say "1b. És ha a megadott könyvtár nincs meg?"
+R=$(mkfactory no)
+bash "$SRC/meta-set.sh" "$R/repo/jobs/t/meta.yaml" "agent.config_dir=$R/home/nincs-ilyen"
 rc=$(run_job "$R")
 echo "  exit=$rc"
-head -3 "$R/run.log" | sed 's/^/     /'
-if [[ "$rc" -ne 0 ]] && grep -q 'Agent nem létezik' "$R/run.log"; then
-    verdict "REPRODUKÁLT — a mag Claude-könyvtárat követel akkor is, ha nem Claude fut"
+grep -m2 'Agent-konfiguráció\|Forrás' "$R/run.log" | sed 's/^/     /'
+if grep -q 'meta.yaml agent.config_dir' "$R/run.log"; then
+    verdict "megnevezi a forrást — látszik, HOL kell javítani"
 else
-    verdict "lefutott Claude-config nélkül is"
+    verdict "nem mondja meg, honnan jött az út"
 fi
 rm -rf "$R"
 
