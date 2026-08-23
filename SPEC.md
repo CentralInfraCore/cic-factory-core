@@ -165,7 +165,13 @@ index is `error`-t mond.
 **Amit még nem garantál:** a `--resume` nem köti magát futásazonosítóhoz, mert
 olyan még nincs. Egy leváltott futás késői eredményét semmi nem utasítja el. Az
 `error` státusz jelentheti azt is, hogy az agent még dolgozik: a finalizer
-szándékosan nem öli meg, és ezt a `test-run-job-finalizer.sh` méri is. **#41.**
+szándékosan nem öli meg, és ezt a `test-run-job-finalizer.sh` méri is.
+
+A 2026-08-23-i mérés közben megfigyelve: a wrapper `SIGTERM`-je után a
+runner-gyerek **túlélte és utólag megírta a végállapotot** — egy megszüntetett
+futás késői eredménye elérte a metát. Ez megfigyelés, nem célzott mérés: az a
+forgatókönyv rosszul volt megtervezve, és nem adjuk elő bizonyítékként. Saját
+mérést érdemel. **#41.**
 
 **Evidence:** az `error` commit, az `error_message`, a job-napló.
 
@@ -208,19 +214,38 @@ tartoznak. **#43.**
 
 **Transition:** kettő, egymástól függetlenül.
 
-**Amit a core ma tud:** semmit, ami ezt biztonságossá tenné. Mindkét futás
-ugyanazt a live checkoutot, ugyanazt a Git indexet és ugyanazt a
-`jobs/index.yaml`-t írja. Nincs lock, nincs külön worktree, és a lifecycle
-commit nem pathspecifikus.
+**Amit a core ma tud:** mindkét futás ugyanazt a live checkoutot, ugyanazt a
+Git indexet és ugyanazt a `jobs/index.yaml`-t írja. Nincs lock, nincs külön
+worktree, és a lifecycle commit nem pathspecifikus.
 
 **Postcondition:** *(amit a lezárása jelentene)* nincs cross-job fájl, stage,
-session vagy ref. Ma ez nem áll fenn, és nincs is mérve.
+session vagy ref.
 
-**Evidence:** *(amit bizonyítania kellene)* determinisztikus, barrieres
-konkurencia-teszt. Időzítésre épülő `sleep` nem elég.
+**Evidence:** barrier-alapú konkurencia-mérés (2026-08-23, a #41 kommentjében).
+Két job párhuzamosan, determinisztikus szinkronizációval — nem `sleep`-pel.
 
-**Ez nem mérve van, hanem az auditból származik.** A #41 törzse ezt
-kimondja: a konkurencia-állítások nem lettek újramérve ebben a repóban.
+**Amit a mérés mutatott — reprodukálódott:**
+
+Mindkét job befejeződött (`awaiting_review`, exit 0), tehát nem vesznek el
+egymás munkájában. A lifecycle-commitok viszont keresztbe visznek:
+
+```
+job: beta — running  →  jobs/alpha/input.md
+job: beta — running  →  jobs/alpha/meta.yaml
+job: beta — running  →  jobs/index.yaml
+```
+
+A következmény nem adatvesztés, hanem **bizonyíték-szennyezés**: a beta `done`
+commitja már nem izolálja, mit csinált a beta.
+
+Ez a rész nem igényel futás-identitást — a lifecycle-commit pathspec-hez
+kötése önmagában megoldja, és önállóan szállítható. #41.
+
+**Amit a mérés NEM mutatott:** a push-verseny viszont igen — két külön
+checkoutból a második push non-fast-forward hibával elutasításra kerül, a job
+`error` lesz, és a helyi `main` olyan lifecycle-állapottal marad előrébb,
+amiről a remote nem tud. Nincs fetch/rebase/retry. Ez az, ami ma ténylegesen
+veszít állapotot.
 
 Amíg ez nem zárul le, a szerződés annyi: **egy orchestrátor, egy checkout,
 egyszerre egy job.**
@@ -229,17 +254,32 @@ egyszerre egy job.**
 
 ### UC-06 — Ugyanaz a job versengő indítása
 
-**Státusz:** `még nem` — #41
+**Státusz:** `részleges` — #41
 
 **Precondition:** két folyamat ugyanarra a `job_id`-ra.
 
-**Amit a core ma tud:** a `run-job.sh` egyszer beolvassa a státuszt, majd
-feltétel nélkül átírja. Nincs `run_id`, tulajdonos, generáció, lock vagy
-compare-and-swap. A `WE_SET_RUNNING` lokális boolean: azt jelzi, hogy MI
-állítottuk `running`-ra, nem azt, hogy még mindig mi birtokoljuk a jobot.
+**Amit a core ma tud:** többet, mint amennyit az audit alapján gondoltunk. A
+`run-job.sh` beolvassa a státuszt, és ha az már `running`, megáll:
 
-A nem-resume ág `rm -rf`-fel törli a workspace-t és újraklónoz — két futás
-egymás alól törölheti. A törlés útja ellenőrzött (#32), a versenyhelyzet nem.
+```
+[WARN] Job már fut. Folytatod? (y/N)
+```
+
+Nem-interaktívan (lezárt stdin) elutasít, exit 1.
+
+**Amit a mérés mutatott — NEM reprodukálódott:**
+
+0,3 másodperces késleltetéssel **és** öt teljesen egyidejű indítással: 5/5-ben
+a második megállt. Mivel a workspace-lépésig el sem jut, az `rm -rf` sem
+történik meg — a workspace-be tett canary minden futásban túlélte.
+
+**Ez nem compare-and-swap.** Valós olvasás-írás ablak van, lock nélkül, és a
+`WE_SET_RUNNING` lokális boolean: azt jelzi, hogy MI állítottuk `running`-ra,
+nem azt, hogy még mindig mi birtokoljuk a jobot. De a naiv „mindkettő átmegy"
+egyetlen mért futásban sem következett be.
+
+A különbség számít a tervezésnél: ezt **keményíteni** kell, nem nulláról
+megépíteni. #41.
 
 **Transition:** *(amit a lezárása jelentene)* `pending → running`, de compare-and-
 swap-pel: várt állapot, várt revízió és futás-identitás ellenőrzésével.
