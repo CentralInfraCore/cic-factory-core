@@ -56,6 +56,17 @@ A hibás reakció:
 ## A review nyomot hagy
 
 A review eredménye nem chat-üzenet, hanem **`jobs/<job-id>/review.md`** — lásd
-`/job-close` 4. pontját a sablonért. Amit nem ellenőriztél, azt írd be a
+`/job-close` 4. pontját a sablonért.
+
+**A review nevezze meg, melyik futást nézte.** A `meta.yaml` `run_id` mezőjéből
+másold be:
+
+```
+- run_id: <a meta.yaml run_id mezőjéből>
+```
+
+Enélkül a `close-job.sh` C6 feltétele elutasít. Nem formalitás: mérve, hogy
+enélkül egy ÚJ attempt lezárható volt egy KORÁBBI attempt review-jával — a close
+a fájl meglétét látta, azt nem, melyik futáshoz készült. Amit nem ellenőriztél, azt írd be a
 „nem igazolt" sorba. Egy review, ami csak annyit mond hogy „átnéztem, jó",
 pontosan annyit ér, mint az agent summaryja, amit felül kellett volna vizsgálnia.

@@ -29,7 +29,8 @@ mkroot() {
     printf '# Fixture\n' > "$r/README.md"
     printf 'K1 K3\n' > "$r/tools/validate-spec.sh"
     printf 'O1 O5\n' > "$r/tools/validate-output.sh"
-    printf 'C1 C5\n' > "$r/tools/close-job.sh"
+    printf 'refuse "C1 — x"\nrefuse "C5 — y"\n' > "$r/tools/close-job.sh"
+    printf '# job-close\n\n| C1 | x |\n| C5 | y |\n' > "$r/.claude/commands/job-close.md"
     printf '# job-validate\n\n<!-- manual-rules: K2 -->\n' > "$r/.claude/commands/job-validate.md"
     git -C "$r" init -q
     git -C "$r" config user.email t@t; git -C "$r" config user.name t
@@ -190,6 +191,27 @@ printf 'K1 K2 K3\n' > "$R/tools/validate-spec.sh"
 commit "$R"
 check "exit 1" "1" "$(run "$R")"
 check_log "  megnevezi" "K2 kéziként van deklarálva" "$R/out.log"
+rm -rf "$R"
+
+echo
+echo "D5 — kikényszerített szabály dokumentáció nélkül"
+# A C6 (#43) olyat kért a review.md-től, amit egyik parancs sem mondott: a kapu
+# elutasított valamiért, amit sehol nem lehetett megtudni.
+R=$(mkroot)
+printf 'refuse "C1 — x"\nrefuse "C9 — dokumentalatlan"\n' > "$R/tools/close-job.sh"
+printf '# job-close\n\n| C1 | x |\n' > "$R/.claude/commands/job-close.md"
+commit "$R"
+check "exit 1" "1" "$(run "$R")"
+check_log "  megnevezi a szabalyt" "kikényszeríti a C9-t, de nincs dokumentálva" "$R/out.log"
+rm -rf "$R"
+
+echo
+echo "  ugyanez dokumentálva → GO"
+R=$(mkroot)
+printf 'refuse "C1 — x"\nrefuse "C9 — most mar leirva"\n' > "$R/tools/close-job.sh"
+printf '# job-close\n\n| C1 | x |\n| C9 | most mar leirva |\n' > "$R/.claude/commands/job-close.md"
+commit "$R"
+check "exit 0" "0" "$(run "$R")"
 rm -rf "$R"
 
 echo "==== $pass PASS / $fail FAIL ===="

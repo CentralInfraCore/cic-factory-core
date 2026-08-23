@@ -63,6 +63,7 @@ Sablon:
 - Dátum: <ISO 8601>
 - Feature branch: feature/<job-id>
 - Review-zott commit: <sha>
+- run_id: <a meta.yaml run_id mezőjéből>
 
 ## Gépi kapuk
 
@@ -112,6 +113,7 @@ megnevezi, melyik:
 | C3 | a `validate-output.sh` GO-t ad |
 | C4 | a `review.md` létezik, nem üres, és nincs benne placeholder |
 | C5 | ha a futás `--skip-spec-gate`-tel indult, a `review.md` ezt elismeri |
+| C6 | a `review.md` megnevezi a `run_id`-t, amit nézett |
 
 A C3 újrafuttatja a 3. pont kapuját. Ez szándékos: a 3. pont azért van, hogy te
 **lásd** az eredményt, mielőtt a review-t írod; a C3 azért, hogy a lezárás ne
