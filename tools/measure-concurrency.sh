@@ -88,6 +88,13 @@ launch() {  # <root> <job> <logsuffix>
         </dev/null ) >"$r/$job$sfx.log" 2>&1 &
     LAUNCHED_PID=$!
 }
+
+# A `$!` az ALHÉJ pid-je, nem a run-job.sh-é. Egy `kill` rá árván hagyja a
+# wrappert, ami vidáman befejezi a munkát — a 2026-08-23-i "megfigyelés",
+# hogy egy megszüntetett futás utólag írt, ennek az artefaktja volt.
+wrapper_pid() {  # <root> <job>
+    pgrep -f "bash tools/run-job.sh $2 agent-01" | head -1
+}
 wait_ready() { local r="$1" n="$2" i=0
     while [[ $(ls "$r"/ready.* 2>/dev/null | wc -l) -lt "$n" ]]; do
         sleep 0.1; i=$((i+1)); [[ $i -gt 300 ]] && return 1; done; return 0; }
@@ -233,5 +240,58 @@ if [[ "$REMOTE_HAS" != "$LOCAL_MAIN" ]]; then
     grep -hiE 'reject|non-fast-forward|failed to push|hiba' "$R"/eta*.log | head -3 | sed 's/^/     /'
 else
     verdict "a push rendeződött (a remote és a helyi main egyezik)"
+fi
+rm -rf "$R"
+
+# ── 6. Tud-e még írni egy megszüntetett futás? (#65) ────────────────────────
+say "6. Megszüntetett futás késői írása (#65)"
+R=$(mkfactory theta)
+launch "$R" theta; SUBSHELL=$LAUNCHED_PID
+wait_ready "$R" 1 >/dev/null
+WRAPPER=$(wrapper_pid "$R" theta)
+echo "  alhéj pid=$SUBSHELL   wrapper pid=${WRAPPER:-<nincs>}"
+if [[ -z "$WRAPPER" ]]; then
+    verdict "MÉRHETETLEN — nem találom a wrapper folyamatot"
+else
+    kill -TERM "$WRAPPER" 2>/dev/null
+    sleep 1
+    AFTER_KILL=$(status_of "$R" theta)
+    echo "  a wrapper megölése után: $AFTER_KILL"
+    # a runner-gyerek még blokkol; most engedjük el
+    touch "$R/go"; sleep 1.5
+    AFTER_GO=$(status_of "$R" theta)
+    echo "  a runner elengedése után: $AFTER_GO"
+    if [[ "$AFTER_KILL" != "$AFTER_GO" ]]; then
+        verdict "REPRODUKÁLT — a megszüntetett futás utólag írt: $AFTER_KILL → $AFTER_GO"
+    else
+        verdict "nem írt utólag (a státusz végig '$AFTER_GO' maradt)"
+    fi
+    kill -TERM "$SUBSHELL" 2>/dev/null; wait "$SUBSHELL" 2>/dev/null
+fi
+rm -rf "$R"
+
+# ── 7. A régi futás finalizere az újabb attempt fölé ír-e? (#65) ────────────
+say "7. Régi finalizer az újabb attempt állapota fölé (#65)"
+R=$(mkfactory iota)
+launch "$R" iota; SUBSHELL=$LAUNCHED_PID
+wait_ready "$R" 1 >/dev/null
+WRAPPER=$(wrapper_pid "$R" iota)
+if [[ -z "$WRAPPER" ]]; then
+    verdict "MÉRHETETLEN — nem találom a wrapper folyamatot"
+else
+    # B attempt szimulálása: egy ÚJABB futás állítja be az állapotot
+    bash "$CORE/meta-set.sh" "$R/repo/jobs/iota/meta.yaml" \
+        'status=running' 'lease_expires=2099-01-01T00:00:00Z'
+    echo "  szimulált B attempt: status=running, friss lease"
+    # most öljük meg az A wrappert — a finalizere most fut le
+    kill -TERM "$WRAPPER" 2>/dev/null; sleep 1.5
+    AFTER=$(status_of "$R" iota)
+    echo "  az A finalizerének lefutása után: $AFTER"
+    if [[ "$AFTER" == "error" ]]; then
+        verdict "REPRODUKÁLT — az A finalizere error-ra írta a B által beállított állapotot"
+    else
+        verdict "nem írta felül (a státusz '$AFTER')"
+    fi
+    touch "$R/go"; kill -TERM "$SUBSHELL" 2>/dev/null; wait "$SUBSHELL" 2>/dev/null
 fi
 rm -rf "$R"
