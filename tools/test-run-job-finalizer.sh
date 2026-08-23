@@ -179,6 +179,23 @@ REMOTE_IDX=$(git -C "$G" show origin/main:jobs/index.yaml 2>/dev/null || echo ""
 check "  a távoli index sem mond running-ot" "0" "$(printf '%s' "$REMOTE_IDX" | grep -c 'running')"
 check "  a távoli index error-t mond" "1" "$(printf '%s' "$REMOTE_IDX" | grep -c 'error')"
 
+# A finalizer commitja is csak a saját path-jait viheti (#63). Idegen fájlt
+# stage-elünk, mielőtt a finalizer commitol.
+echo "idegen munka" > "$G/IDEGEN.txt"
+git -C "$G" add IDEGEN.txt
+mkmeta "$G/jobs/t/meta.yaml" "running"
+python3 - "$G/jobs/t/meta.yaml" <<'PYZ'
+import sys
+p = sys.argv[1]; c = open(p).read()
+open(p, "w").write('job_id: "t"\nlevel: "repo"\n' + c)
+PYZ
+bash "$G/tools/case.sh" >/dev/null 2>&1
+ERRC=$(git -C "$G" log --format='%H %s' | awk '/— error \(wrapper/{print $1; exit}')
+check "  a finalizer commitja nem visz idegen fájlt" "0" \
+    "$(git -C "$G" show --name-only --format='' "$ERRC" 2>/dev/null | grep -c '^IDEGEN.txt$')"
+check "  az idegen fájl stage-elve maradt" "1" \
+    "$(git -C "$G" diff --cached --name-only | grep -c '^IDEGEN.txt$')"
+
 echo
 echo "7. Idézőjel nélküli status: a finalizer akkor is javít"
 # Az `awk -F'"'` olvasó erre ÜRES stringet adott, tehát a finalizer némán nem

@@ -110,7 +110,8 @@ finalize() {
             || echo "[!] Az index regenerálása nem sikerült — a commit a régi indexet viszi." >&2
 
         if timeout 60 git -C "$WORKDIR" add "$META" jobs/index.yaml 2>/dev/null \
-           && timeout 60 git -C "$WORKDIR" commit -q -m "job: ${JOB_ID:-?} — error (wrapper exited early)" 2>/dev/null \
+           && timeout 60 git -C "$WORKDIR" commit -q -m "job: ${JOB_ID:-?} — error (wrapper exited early)" \
+                  -- "$META" jobs/index.yaml 2>/dev/null \
            && timeout 60 git -C "$WORKDIR" push -q 2>/dev/null; then
             echo "[*] Az error állapot kipusholva — a remote nem mutat futó jobot." >&2
         else
@@ -363,6 +364,27 @@ push_lifecycle() {   # <a job elvárt távoli státusza a push ELŐTT>
     return 1
 }
 
+# A lifecycle-commit csak a saját job path-jait viheti.
+#
+# Mérve (2026-08-23, #63): két job párhuzamosan, és az egyik állapot-commitja
+# a másik fájljait is magával vitte:
+#
+#   job: beta — running  →  jobs/alpha/meta.yaml
+#
+# A `git add` a megnevezett path-okat stage-eli, a `git commit` viszont
+# pathspec nélkül MINDENT commitol, ami már stage-elve van -- akármit tett oda
+# egy másik futás egy pillanattal korábban.
+#
+# Nem adatvesztés, hanem bizonyíték-szennyezés: a job done commitja már nem
+# izolálja, mit csinált a job. A #44 proof-profilja egy kevert snapshotot
+# igazolna.
+commit_lifecycle() {   # <commit-üzenet>
+    local msg="$1"
+    # A pathspec a commitnál dönt, nem az indexnél: ami más futásból van
+    # stage-elve, az stage-elve marad, de nem kerül BELE ebbe a commitba.
+    git -C "$WORKDIR" commit -q -m "$msg" -- "$META" jobs/index.yaml
+}
+
 # --- pending → running ---
 echo "[*] $JOB_ID — running ($NOW)"
 # A `^\s+started:` és `^\s+completed:` minták nem voltak szekcióhoz kötve:
@@ -384,7 +406,7 @@ WE_SET_RUNNING=1   # from here on, an early exit is ours to clean up
 
 bash "$WORKDIR/tools/update-index.sh"
 git -C "$WORKDIR" add "$META" jobs/index.yaml
-git -C "$WORKDIR" commit -m "job: $JOB_ID — running"
+commit_lifecycle "job: $JOB_ID — running"
 # A push ELŐTT a remote még a futás előtti állapotot mutatja a jobra.
 push_lifecycle "$STATUS"
 
@@ -822,7 +844,7 @@ bash "$WORKDIR/tools/meta-set.sh" "$META" "${META_ASSIGNMENTS[@]}"
 
 bash "$WORKDIR/tools/update-index.sh"
 git -C "$WORKDIR" add "$META" jobs/index.yaml
-git -C "$WORKDIR" commit -m "job: $JOB_ID — $NEW_STATUS"
+commit_lifecycle "job: $JOB_ID — $NEW_STATUS"
 # Ekkor a remote azt kell mutassa, amit mi tettünk ki: running.
 push_lifecycle "running"
 

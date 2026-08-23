@@ -128,7 +128,7 @@ drifts:
 
 | suite | what it covers |
 |---|---|
-| `tools/test-run-job-finalizer.sh` | the finalizer trap: SIGPIPE, SIGTERM, closed stdout, never leaving `meta.yaml` claiming `running` when nothing runs, and never pushing a corrected meta beside an index that still says running (22 checks) |
+| `tools/test-run-job-finalizer.sh` | the finalizer trap: SIGPIPE, SIGTERM, closed stdout, never leaving `meta.yaml` claiming `running` when nothing runs, and never pushing a corrected meta beside an index that still says running, and never sweeping a foreign staged file into its commit (24 checks) |
 | `tools/test-lifecycle-transitions.sh` | the state transition `run-job.sh` performs, and the invariant that it can never write `done` (6 checks) |
 | `tools/test-close-job.sh` | every refusal in `close-job.sh` — wrong status, failing output gate, missing/empty/unfinished review, an unacknowledged spec-gate bypass, a bypass hidden behind a YAML comment, an unknown gate value, malformed and duplicate-keyed metas — each against a fixture that violates it (48 checks) |
 | `tools/test-run-job-spec-gate.sh` | that `run-job.sh` refuses a NO-GO spec, that `--skip-spec-gate` still starts, and that the bypass is recorded in `meta.yaml` (15 checks) |
@@ -150,6 +150,7 @@ drifts:
 | `tools/test-commit-msg-signer.sh` | that the signer refuses rather than downgrading — no CA, a non-https endpoint, no token, an unreachable Vault — and that the token reaches curl through a 0600 config file, never the process list (25 checks) |
 | `tools/test-run-job-boundaries.sh` | that an exported secret named in `input.md` never reaches the prompt, that `$ref`/`$schema` in a spec are left alone instead of being blanked, and that an identifier which would build a path outside `jobs/` is refused before anything is deleted, that a `kb_focus` list is read whatever quoting it uses, and and that a variable which is set but not allowlisted is reported rather than silently left literal (46 checks) |
 | `tools/test-push-reconciliation.sh` | that a rejected push is reconciled rather than swallowed — the remote moved on an unrelated path, the job was reassigned underneath, and the message that used to claim the feature branch was pushed no matter what (19 checks) |
+| `tools/test-commit-scope.sh` | that a lifecycle commit carries only its own job's paths — another job's meta staged first, a foreign file at the repo root, and the staged change left where it was (11 checks) |
 
 Every step was measured against a deliberately broken copy before it landed,
 because a gate that cannot go red is decoration. That measurement is not a

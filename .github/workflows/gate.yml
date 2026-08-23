@@ -141,6 +141,11 @@ jobs:
       - name: push reconciliation
         run: bash tools/test-push-reconciliation.sh
 
+      # A lifecycle-commit csak a saját job path-jait viheti: pathspec nélkül
+      # mindent commitolt, ami stage-elve volt, akármelyik futás tette oda.
+      - name: lifecycle commits stay in scope
+        run: bash tools/test-commit-scope.sh
+
       # Behaviour, not just syntax. The finalizer suite covers the SIGPIPE/SIGTERM
       # incident; the lifecycle suite covers the transition run-job.sh performs,
       # which the finalizer suite is structurally blind to -- it only extracts the
