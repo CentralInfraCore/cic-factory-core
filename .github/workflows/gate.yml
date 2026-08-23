@@ -146,6 +146,11 @@ jobs:
       - name: lifecycle commits stay in scope
         run: bash tools/test-commit-scope.sh
 
+      # Az „ez a job már fut" őr. Nem lock — de a nem-interaktív elutasítása
+      # eddig véletlen mellékhatás volt, és egyáltalán nem volt rá teszt.
+      - name: same-job guard
+        run: bash tools/test-same-job-guard.sh
+
       # Behaviour, not just syntax. The finalizer suite covers the SIGPIPE/SIGTERM
       # incident; the lifecycle suite covers the transition run-job.sh performs,
       # which the finalizer suite is structurally blind to -- it only extracts the

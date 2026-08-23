@@ -2,7 +2,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # SPDX-FileCopyrightText: 2025-2026 Sinkó Gábor Zoltán / CentralInfraCore
 # Job lifecycle wrapper
-# Használat: ./tools/run-job.sh <job-id> [agent-id] [--resume] [--skip-spec-gate]
+# Használat: ./tools/run-job.sh <job-id> [agent-id] [--resume] [--skip-spec-gate] [--force]
+#
+#   --force
+#       Egy már futó/lefutott job átvétele. Enélkül nem-interaktív
+#       futásban a wrapper megáll, és megmondja, mit kell tenni.
 #
 #   --skip-spec-gate
 #              Kihagyja a kötelező validate-spec.sh kaput. Csak akkor, ha
@@ -138,10 +142,12 @@ shift
 AGENT_ID="agent-01"
 RESUME=0
 SKIP_SPEC_GATE=0
+FORCE=0
 for arg in "$@"; do
     case "$arg" in
         --resume) RESUME=1 ;;
         --skip-spec-gate) SKIP_SPEC_GATE=1 ;;
+        --force) FORCE=1 ;;
         *) AGENT_ID="$arg" ;;
     esac
 done
@@ -254,14 +260,57 @@ if [[ "$RESUME" -eq 1 ]]; then
     [[ -d "$FACTORY_CLONE" ]] || { echo "[ERROR] Nincs workspace: $FACTORY_CLONE — előbb futtasd a job-ot --resume nélkül"; exit 1; }
     [[ -f "$SESSION_DIR/$SESSION_ID.jsonl" ]] || { echo "[ERROR] Session jsonl nem található: $SESSION_DIR/$SESSION_ID.jsonl"; exit 1; }
 else
+    # Ez az őr NEM lock: a státusz olvasása és a `running` kiírása között van
+    # ablak, amit semmi nem zár (#41). De a mérés (#66) szerint működik: hat
+    # egyidejű indításból hatszor megállította a másodikat.
+    #
+    # Amit javítani kellett rajta: a nem-interaktív elutasítás VÉLETLEN volt.
+    # `read` lezárt stdin-en hibával tér vissza, az `ans` üres marad, és a job
+    # emiatt állt meg — nem azért, mert így döntöttünk. Egy automatizált
+    # környezetben egy kiszámíthatatlan mellékhatásra támaszkodni ugyanaz a
+    # műfaj, mint a hookot policy-határnak nevezni.
+    guard() {   # <miért állunk meg> <mit tegyen, aki folytatni akarja>
+        local why="$1" hint="$2"
+        if [[ "$FORCE" -eq 1 ]]; then
+            echo "[!] $why — a --force ezt felülírja. A futás folytatódik." >&2
+            return 0
+        fi
+        echo "[!] $why" >&2
+        if [[ ! -t 0 ]]; then
+            echo "    Nem-interaktív futás: nem kérdezek, és nem tippelek." >&2
+            echo "    $hint" >&2
+            exit 1
+        fi
+        printf '    Folytatod? (y/N) ' >&2
+        local ans=""; read -r ans || true
+        [[ "$ans" == "y" || "$ans" == "Y" ]] || exit 1
+    }
+
     if [[ "$STATUS" == "running" ]]; then
-        echo "[WARN] Job már fut. Folytatod? (y/N)"; read -r ans; [[ "$ans" == "y" ]] || exit 1
+        # A lease elmondja, hogy ez élő futás vagy egy elakadt maradványa.
+        # A kettő nem ugyanaz a döntés, és eddig ugyanazt a mondatot kapták.
+        lease=$(bash "$WORKDIR/tools/meta-get.sh" "$META" lease_expires 2>/dev/null) || lease=""
+        if [[ -z "$lease" ]]; then
+            detail="lease nélkül — nem eldönthető, él-e még"
+        elif exp=$(date -u -d "$lease" +%s 2>/dev/null); then
+            now=$(date -u +%s)
+            if [[ "$now" -gt "$exp" ]]; then
+                detail="a lease $(( (now - exp) / 60 )) perce lejárt — valószínűleg elakadt"
+            else
+                detail="ÉLŐ futás, a lease $(( (exp - now) / 60 )) perc múlva jár le"
+            fi
+        else
+            detail="a lease értelmezhetetlen: '$lease'"
+        fi
+        guard "Job már fut ($detail)." \
+              "Ha tényleg el akarod venni tőle: --force. Előbb nézd meg a tools/check-stale-jobs.sh kimenetét."
     fi
     if [[ "$STATUS" == "awaiting_review" ]]; then
-        echo "[WARN] Job lefutott, review-ra vár. Újrafuttatod? (y/N)"; read -r ans; [[ "$ans" == "y" ]] || exit 1
+        guard "Job lefutott, review-ra vár." \
+              "Újrafuttatáshoz: --force. A korábbi review.md és output/ megmarad."
     fi
     if [[ "$STATUS" == "done" ]]; then
-        echo "[WARN] Job már kész. Újrafuttatod? (y/N)"; read -r ans; [[ "$ans" == "y" ]] || exit 1
+        guard "Job már kész." "Újrafuttatáshoz: --force."
     fi
 fi
 

@@ -151,6 +151,7 @@ drifts:
 | `tools/test-run-job-boundaries.sh` | that an exported secret named in `input.md` never reaches the prompt, that `$ref`/`$schema` in a spec are left alone instead of being blanked, and that an identifier which would build a path outside `jobs/` is refused before anything is deleted, that a `kb_focus` list is read whatever quoting it uses, and and that a variable which is set but not allowlisted is reported rather than silently left literal (46 checks) |
 | `tools/test-push-reconciliation.sh` | that a rejected push is reconciled rather than swallowed — the remote moved on an unrelated path, the job was reassigned underneath, and the message that used to claim the feature branch was pushed no matter what (19 checks) |
 | `tools/test-commit-scope.sh` | that a lifecycle commit carries only its own job's paths — another job's meta staged first, a foreign file at the repo root, and the staged change left where it was (11 checks) |
+| `tools/test-same-job-guard.sh` | that starting a job which is already running refuses explicitly rather than by accident — a live lease, an expired one, a missing one, an unparseable one, and `--force` taking it over on purpose (26 checks) |
 
 Every step was measured against a deliberately broken copy before it landed,
 because a gate that cannot go red is decoration. That measurement is not a
