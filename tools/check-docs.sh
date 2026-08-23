@@ -22,6 +22,13 @@
 #       sehol nem létezett. Egy tartomány olyan állítás, amit senki nem
 #       ellenőrzött — ezt nézi ez a szabály.
 #
+#   D5  az implementált K/O/C szabályok dokumentálva vannak
+#       A D4 fordítottja. A C6 (#43) olyat kért a review.md-től, amit a
+#       /job-review és a /job-close egyik sem mondott — a kapu elutasított
+#       valamiért, amit sehol nem lehetett megtudni. Ugyanaz az osztály, mint
+#       a #58 FACTORY_PROMPT_VARS-a: egy követelmény, ami nincs kimondva, nem
+#       követelmény, hanem csapda.
+#
 # Exit 0 = rendben, exit 1 = van hiba.
 
 set -uo pipefail
@@ -223,6 +230,50 @@ if [[ -n "$MISSING" ]]; then
     FAILED=1
 else
     echo "  OK — minden hivatkozott K/O/C szabály létezik"
+fi
+
+echo
+echo "D5 — az implementált kapuszabályok dokumentálva vannak"
+UNDOC=$(python3 - <<'PYD5'
+import os
+import re
+
+# Melyik script melyik szabálybetűt implementálja, és hol kell dokumentálva lennie.
+PAIRS = [("C", "tools/close-job.sh",
+          [".claude/commands/job-close.md"]),
+         ("O", "tools/validate-output.sh",
+          [".claude/commands/job-close.md", ".claude/commands/job-review.md"]),
+         ("K", "tools/validate-spec.sh",
+          [".claude/commands/job-validate.md"])]
+
+out = []
+for letter, impl, docs in PAIRS:
+    try:
+        body = open(impl, encoding="utf-8").read()
+    except OSError:
+        continue
+    # Csak az ELUTASÍTÁSOKAT nézzük: azok a kikényszerített szabályok.
+    rules = set(re.findall(rf'refuse\s+"({letter}\d+b?)\b', body))
+    rules |= set(re.findall(rf'NO-GO[^"\n]*\b({letter}\d+b?)\b', body))
+    if not rules:
+        continue
+    text = ""
+    for d in docs:
+        if os.path.exists(d):
+            text += open(d, encoding="utf-8").read()
+    for rule in sorted(rules):
+        if not re.search(rf'(?<![A-Za-z0-9]){rule}(?![A-Za-z0-9])', text):
+            out.append(f"  {impl} kikényszeríti a {rule}-t, de nincs dokumentálva "
+                       f"({', '.join(docs)})")
+print("\n".join(out))
+PYD5
+)
+if [[ -n "$UNDOC" ]]; then
+    echo "$UNDOC"
+    echo "  FAIL — a kapu olyat kér, amit a parancs nem mond"
+    FAILED=1
+else
+    echo "  OK — minden kikényszerített szabály dokumentált"
 fi
 
 echo
