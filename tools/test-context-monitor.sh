@@ -119,5 +119,29 @@ check "  evakuációs sablon készült" "1" "$([ -s "$R/workdir/jobs/demo-job/ou
 rm -rf "$R"
 
 echo
+echo "Két friss debug-log egy configban → nem tippel (#42)"
+# Mérve: a forrás kiválasztása tisztán mtime szerint ment, job-kötés nélkül.
+# Két azonos agent-configon futó job egymás context-értékét olvashatta, és a
+# rossz job kaphatott EMERGENCY-t.
+R=$(mkenv)
+printf 'autocompact: tokens=950 effectiveWindow=1000\n' > "$R/claude/debug/a.txt"
+printf 'autocompact: tokens=100 effectiveWindow=1000\n' > "$R/claude/debug/b.txt"
+for _ in 1 2 3; do runhook "$R" >/dev/null; done
+check "nem ad EMERGENCY-t idegen adatból" "0" "$(grep -c 'EMERGENCY' "$R/out.log")"
+# Hívásonként egy üzenet: a minden-harmadik-hívás kapu miatt három futásból
+# egyszer szólal meg, nem kétszer (a ciklus két config-jelöltet néz).
+check "  megmondja, hogy nem eldönthető" "1" "$(grep -c 'nem eldönthető, melyik ezé a jobé' "$R/out.log")"
+rm -rf "$R"
+
+echo
+echo "  EGY friss debug-log → továbbra is olvassa"
+R=$(mkenv)
+printf 'autocompact: tokens=950 effectiveWindow=1000\n' > "$R/claude/debug/a.txt"
+for _ in 1 2 3; do runhook "$R" >/dev/null; done
+check "figyelmeztet a fogyó contextre" "1" "$(grep -c 'EMERGENCY\|CRITICAL' "$R/out.log")"
+check "  nem mondja kétértelműnek" "0" "$(grep -c 'nem eldönthető' "$R/out.log")"
+rm -rf "$R"
+
+echo
 echo "$pass PASS, $fail FAIL"
 [[ "$fail" -eq 0 ]]

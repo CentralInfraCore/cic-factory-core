@@ -84,26 +84,36 @@ grep -n 'claude-personal\|PROJECT_SLUG\|SESSION_DIR\|\.jsonl' "$SRC/run-job.sh" 
 verdict "a runner-szerződés az INDÍTÁST választotta le, a session-kezelést nem"
 
 say "4. Két job egy agent-configon: felszedheti-e egymás sessionjét?"
-# Az audit "globális mtime szerinti session-felderítést" állított. A valóság
-# szűkebb: SESSION_DIR-re korlátozva, és egy `-newer $SESSION_MARKER` őrrel,
-# ahol a marker a futás elején keletkezik. Az ablak viszont megvan: a marker
-# után KELETKEZETT bármelyik .jsonl közül az ls -t az elsőt viszi.
+# A VALÓDI runnert méri, nem a kiválasztó logika másolatát. Az echo runner nem
+# ad vissza session-azonosítót, tehát a fallback ág fut -- és előre elhelyezünk
+# két .jsonl-t, mintha egy másik job is ezen a configon dolgozna.
 R=$(mkfactory yes)
 SD="$R/home/.claude-personal/agents/agent-01/projects/$(echo "$R/repo" | sed 's#[/_]#-#g')"
 mkdir -p "$SD"
-MARKER=$(mktemp); sleep 0.05
-# két session-fájl, mintha két job ugyanabban a configban dolgozna
+cat > "$R/repo/tools/runners/twosess.sh" <<RUN
+#!/usr/bin/env bash
+set -uo pipefail
+mkdir -p "$SD"
 touch "$SD/JOB-A-1111.jsonl"; sleep 0.05
 touch "$SD/JOB-B-2222.jsonl"
-PICKED=$(find "$SD" -maxdepth 1 -name '*.jsonl' -newer "$MARKER" 2>/dev/null \
-         | xargs -r ls -t 2>/dev/null | head -1 | xargs -r basename -s .jsonl)
-echo "  két session a markert követően; a kiválasztott: $PICKED"
-if [[ "$PICKED" == "JOB-B-2222" ]]; then
-    verdict "REPRODUKÁLT — a legfrissebbet viszi, akármelyik job írta. Az őr az IDŐ, nem a job."
+python3 -c "
+import json,sys
+json.dump({'result':'kesz','models':'x','stop_reason':'end_turn'}, open(sys.argv[1],'w'))" "\$CIC_RESULT_JSON"
+exit 0
+RUN
+chmod +x "$R/repo/tools/runners/twosess.sh"
+( cd "$R/repo" && env HOME="$R/home" CIC_AGENT_RUNNER=twosess \
+    bash tools/run-job.sh t agent-01 --skip-spec-gate </dev/null ) >"$R/two.log" 2>&1
+PICKED=$(bash "$SRC/meta-get.sh" "$R/repo/jobs/t/meta.yaml" agent.session_id 2>/dev/null)
+echo "  két session keletkezett a futás alatt"
+echo "  a metába került session_id: '${PICKED:-<üres>}'"
+if [[ -n "$PICKED" ]]; then
+    verdict "REPRODUKÁLT — választott egyet, pedig nem tudhatta, melyik ezé a jobé"
 else
-    verdict "nem a legfrissebbet vitte ($PICKED)"
+    grep -m1 'session-jelölt' "$R/two.log" | sed 's/^/     /'
+    verdict "nem tippelt — a session_id üres maradt, és megmondta miért"
 fi
-rm -f "$MARKER"; rm -rf "$R"
+rm -rf "$R"
 
 say "5. A context-monitor hook melyik debug-logot olvassa?"
 # Az audit: "a monitor mindig a teljes közös CLAUDE_CONFIG_DIR/debug legújabb
