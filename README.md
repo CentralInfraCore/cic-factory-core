@@ -36,6 +36,7 @@ the lifecycle convention. All three are here.
 tools/run-job.sh                job lifecycle driver
 tools/check-sequences.sh        the SPEC use-case contract matches the code
 tools/measure-concurrency.sh    barrier-based concurrency measurement (not a gate)
+tools/measure-close-binding.sh  what the close does and does not bind (not a gate)
 tools/validate-spec.sh          pre-run machine gate (K1, K3, K4, K7, K7b, K8, K9, K10, K11)
 tools/validate-output.sh        pre-merge machine gate (O1–O5)
 tools/update-index.sh           job state map regeneration
