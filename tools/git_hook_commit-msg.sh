@@ -85,12 +85,52 @@ fi
 #
 # Verziózott: a régi aláírások a v1 (tar) úton ellenőrizhetők tovább, a
 # verify-signatures.sh mindkettőt tudja.
-MANIFEST_VERSION="cic-tree-manifest/v2"
+MANIFEST_VERSION="cic-tree-manifest/v3"
 OBJECT_FORMAT=$(git rev-parse --show-object-format 2>/dev/null || echo sha1)
+
+# A v3 a commit KONTEXTUSÁT is beleköti, nem csak a fáját.
+#
+# Mérve (#44): a v2 aláírás átültethető volt. Egy A repóban készült blokk
+# változtatás nélkül átment egy MÁSIK repó MÁSIK commitján, más üzenettel —
+# mert csak a fa volt aláírva, és a fa azonos volt.
+#
+# Amit a hook be tud kötni: a commit OID-t nem, mert az még nem létezik. A
+# szerzőt, a committert és az üzenetet igen — és ez zárja az átültetést.
+#
+# Két kézenfekvő mezőt szándékosan NEM kötünk be, mindkettőt mérés után:
+#
+#   remote URL — környezeti állapot, nem commit-állapot. Ugyanaz a repó SSH-n és
+#   HTTPS-en más URL-t ad, egy mirror harmadikat, egy remote nélküli másolat
+#   semmit. Mind legitim, és mind hamis elutasítást kapott volna.
+#
+#   parents — a hook a commit ELŐTT fut, tehát csak a HEAD-et látja. `--amend`
+#   esetén az új commit szülője a HEAD SZÜLŐJE, nem a HEAD: a kötés önmagát
+#   utasította volna el, és először pont ezen a commiton bukott el. A `git rebase`
+#   pedig nem futtatja újra ezt a hookot (mérve) — a régi blokkot változatlanul
+#   viszi át egy ÚJ szülő alá, tehát minden rebase-elt commit ellenőrizhetetlenné
+#   vált volna. Ebben a projektben a rebase minden PR előtt kötelező.
+AUTHOR="$(git var GIT_AUTHOR_IDENT 2>/dev/null | sed 's/ [0-9]* [+-][0-9]*$//')"
+COMMITTER="$(git var GIT_COMMITTER_IDENT 2>/dev/null | sed 's/ [0-9]* [+-][0-9]*$//')"
+# Az üzenet a blokk hozzáfűzése ELŐTT.
+#
+# Két normalizálás kell, és mindkettőt MÉRÉS hozta elő:
+#
+#   `git stripspace --strip-comments` — a `git commit` szerkesztővel a fájlban
+#   `#` kezdetű sorok állnak, amiket a git a hook LEFUTÁSA UTÁN takarít el. A
+#   hook azokat is behashelte volna, a verifier már nem látná őket.
+#
+#   `$( )` — a parancshelyettesítés levágja a záró újsorokat. A merge `MERGE_MSG`
+#   fájlja nem újsorral végződik, a `git log %B` kimenete igen: enélkül minden
+#   merge commit ellenőrizhetetlen lett volna.
+MSG_BODY=$(git stripspace --strip-comments < "$COMMIT_MSG_FILE")
+MSG_SHA=$(printf '%s' "$MSG_BODY" | openssl dgst -sha256 -binary | openssl base64 -A)
 
 DIGEST_B64=$( {
     printf '%s\n' "$MANIFEST_VERSION"
     printf 'object-format: %s\n' "$OBJECT_FORMAT"
+    printf 'author: %s\n' "$AUTHOR"
+    printf 'committer: %s\n' "$COMMITTER"
+    printf 'message-sha256: %s\n' "$MSG_SHA"
     printf 'tree: %s\n' "$TREE_ID"
     # LC_ALL=C: a rendezés ne függjön a futtató locale-jától.
     git ls-tree -r -t "$TREE_ID" | LC_ALL=C sort

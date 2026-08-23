@@ -147,26 +147,23 @@ check "  a hiányzó CA-t nevezi meg" "1" "$(grep -c 'CA certificate not found' 
 rm -rf "$R"
 
 echo
-echo "A hook és a verifier ugyanazt a manifestet számolja (#38)"
-# A hook ÍRJA az aláírt digestet, a verifier ÚJRASZÁMOLJA. Ha a kettő eltér, a
-# saját commitjaink válnának ellenőrizhetetlenné — és külön-külön tesztelve
-# mindkettő zöld lenne.
+echo "A hook a manifest-verziót és egy ép digestet ír a blokkba"
+# FIGYELEM: ez a szakasz korábban azt a CÍMET viselte, hogy "a hook és a
+# verifier ugyanazt a manifestet számolja" — és a verifiert EL SEM INDÍTOTTA.
+# Csak a manifest-sort és a digest ALAKJÁT nézte. Egy hook, ami helyes alakú,
+# de rossz digestet ír, átment volna rajta.
 #
-# Az előző körben ezt a saját teszt-helperemmel mértem: a hookot mutálva a
-# suite zöld maradt, mert a helper nem a hook volt. Itt a VALÓDI hook fut
-# (hamis curl-lel), és a VALÓDI verifier ellenőrzi.
+# A valódi round-tripet (valódi hook → valódi `git commit` → valódi verifier)
+# a tools/test-proof-binding.sh méri. Itt csak az marad, ami tényleg itt van:
+# a blokk alakja.
 R=$(mkenv)
-cp "$SRC/verify-signatures.sh" "$R/repo/tools/" 2>/dev/null || mkdir -p "$R/repo/tools" && cp "$SRC/verify-signatures.sh" "$R/repo/tools/"
-BASE=$(git -C "$R/repo" rev-parse HEAD 2>/dev/null || true)
-if [[ -z "$BASE" ]]; then
-    git -C "$R/repo" add -A >/dev/null 2>&1
-    git -C "$R/repo" commit -q -m init --no-verify >/dev/null 2>&1
-    BASE=$(git -C "$R/repo" rev-parse HEAD)
-fi
+run "$R" >/dev/null
 check "a hook manifest-verziót ír a blokkba" "1" \
-    "$(run "$R" >/dev/null; grep -c 'manifest = cic-tree-manifest/v2' "$R/msg.txt")"
+    "$(grep -c 'manifest = cic-tree-manifest/v3' "$R/msg.txt")"
 check "  a digest base64-sha256 alakú" "1" \
     "$(grep -oP '^digest = \K\S+' "$R/msg.txt" | head -1 | base64 -d 2>/dev/null | wc -c | grep -c '^32$')"
+check "  a commit-kontextust is behasheli" "1" \
+    "$(grep -c "printf 'message-sha256:" "$HOOK")"
 rm -rf "$R"
 
 echo
