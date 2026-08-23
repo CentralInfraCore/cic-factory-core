@@ -83,9 +83,12 @@ EOF
 # A review-nak el kell ismernie a spec_gate: skipped-et, különben a C5 áll meg
 # ELŐBB, és a mérés nem a kötést mérné, hanem a saját fixture-hibáját. (Az első
 # változat pontosan ebbe futott bele: mindkét eset C5-tel bukott.)
-write_review() {
-    printf '# Review — %s\n\nspec_gate: skipped — kézzel néztem át a specet\n\n## Amit ellenőriztem\n- a kapu zöld\n' \
-        "$2" > "$1/repo/jobs/t/review.md"
+# A review-nak a run_id-t is meg kell neveznie (C6, #43), különben a close ott
+# áll meg, és a TOCTOU-esetig el sem jutunk. Harmadik alkalom, hogy a fixture
+# egy ELŐBBI kapun bukott el, és a mérés mást mért volna.
+write_review() {   # <root> <megjelölés> [run_id]
+    printf '# Review — %s\n\nspec_gate: skipped — kézzel néztem át a specet\nrun_id: %s\n\n## Amit ellenőriztem\n- a kapu zöld\n' \
+        "$2" "${3-$(field "$1" run_id)}" > "$1/repo/jobs/t/review.md"
 }
 # Csak a job path-jait commitoljuk: a workspace beágyazott git repo, és a
 # `git add -A` figyelmeztetést dob rá.
@@ -98,7 +101,7 @@ R=$(mkfactory)
 run_job "$R" >/dev/null
 A1_RUN=$(field "$R" run_id); A1_ATT=$(field "$R" attempt)
 write_output "$R" "első attempt"
-write_review "$R" "első attempt"
+write_review "$R" "első attempt" "$A1_RUN"
 echo "  1. attempt: run_id=$A1_RUN attempt=$A1_ATT, review+output megírva"
 
 run_job "$R" --force >/dev/null
@@ -124,16 +127,24 @@ write_output "$R" "eredeti"
 write_review "$R" "eredeti"
 rc=$(close_job "$R")
 echo "  close exit=$rc, státusz=$(field "$R" status)"
-# a close NEM commitol -- az ember teszi, később
-printf '# Riport — KICSERÉLVE\nse tábla, se bizonyíték\n' > "$R/repo/jobs/t/output/report.md"
-echo "  az output a close UTÁN kicserélve, kapun át nem ment"
-commit_done "$R"
-COMMITTED=$(git -C "$R/repo" show HEAD:jobs/t/output/report.md | head -1)
-echo "  a done commitban ez van: $COMMITTED"
-if [[ "$COMMITTED" == *KICSERÉLVE* ]]; then
-    verdict "REPRODUKÁLT — a done commit olyan outputot hordoz, amit a kapu nem látott"
+# A kérdés: a DONE COMMIT azt hordozza-e, amit a kapu validált. Ezért a close
+# saját commitját nézzük, nem egy későbbit — egy utólagos szerkesztés+commit
+# már nem TOCTOU, hanem normál git-művelet.
+DONE_COMMIT=$(git -C "$R/repo" log --format='%H %s' | awk '/job: t — done/{print $1; exit}')
+if [[ -z "$DONE_COMMIT" ]]; then
+    verdict "a close nem commitolt — a done commit az emberé, és a validáció óta bármi történhetett"
 else
-    verdict "nem reprodukálódott"
+    printf '# Riport — KICSERÉLVE\nse tábla, se bizonyíték\n' > "$R/repo/jobs/t/output/report.md"
+    echo "  az output a close UTÁN kicserélve a munkafában"
+    COMMITTED=$(git -C "$R/repo" show "$DONE_COMMIT:jobs/t/output/report.md" | head -1)
+    echo "  a done commitban ez van: $COMMITTED"
+    DIGEST=$(field "$R" result_digest)
+    echo "  a metában rögzített result_digest: ${DIGEST:0:16}…"
+    if [[ "$COMMITTED" == *KICSERÉLVE* ]]; then
+        verdict "REPRODUKÁLT — a done commit olyan outputot hordoz, amit a kapu nem látott"
+    else
+        verdict "nem reprodukálódik — a close azt commitolta, amit validált"
+    fi
 fi
 rm -rf "$R"
 
@@ -146,7 +157,8 @@ close_job "$R" >/dev/null
 commit_done "$R"
 echo "  a done meta run_id-je:  $(field "$R" run_id)"
 echo "  attempt:                $(field "$R" attempt)"
-echo "  a review.md-ben van-e hivatkozás a futásra? $(grep -c 'run_id\|attempt' "$R/repo/jobs/t/review.md")"
-echo "  az outputban?                                $(grep -c 'run_id\|attempt' "$R/repo/jobs/t/output/report.md")"
-verdict "a run_id a metában megvan (#41 óta); a review és az output semmihez nincs kötve"
+echo "  reviewed_run_id:        $(field "$R" reviewed_run_id)"
+echo "  result_digest:          $(field "$R" result_digest | cut -c1-16)…"
+echo "  a review megnevezi a futást? $(grep -c 'run_id' "$R/repo/jobs/t/review.md")"
+verdict "a done meta megmondja, MELYIK futást zárták le és MIT látott a kapu"
 rm -rf "$R"

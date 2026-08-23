@@ -34,9 +34,11 @@ WORKDIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 JOB_ID=""
 DRY_RUN=0
+NO_COMMIT=0
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=1 ;;
+        --no-commit) NO_COMMIT=1 ;;
         -*) echo "Unknown flag: $arg" >&2; exit 1 ;;
         *) JOB_ID="$arg" ;;
     esac
@@ -140,6 +142,44 @@ case "$SPEC_GATE" in
         ;;
 esac
 
+# --- C6 ---
+# Mérve (#43): egy 2. attempt lezárult az 1. attempt review-jával. A close a
+# fájlok MEGLÉTÉT nézte, nem azt, melyik futáshoz tartoznak — mert semmi nem
+# rögzítette.
+#
+# A #41 óta van run_id. Ha a meta hordoz egyet, a review-nak meg kell neveznie:
+# az mondja meg, hogy EZT a futást nézte valaki, nem egy korábbit. Ha a metában
+# nincs run_id, a job a mező bevezetése előttről való, és ez a feltétel nem
+# alkalmazható rá.
+rc=0; RUN_ID=$(bash "$META_GET" "$META" run_id) || rc=$?
+[[ "$rc" -eq 0 ]] || RUN_ID=""
+if [[ -n "$RUN_ID" ]]; then
+    if ! grep -qF "$RUN_ID" "$REVIEW"; then
+        echo "" >&2
+        echo "A review.md nem nevezi meg, melyik futást nézte." >&2
+        echo "Ez a job jelenleg ezt futtatta:" >&2
+        echo "" >&2
+        echo "    run_id: $RUN_ID" >&2
+        echo "" >&2
+        echo "Tedd bele a review.md-be. Enélkül nem eldönthető, hogy a review" >&2
+        echo "ehhez a futáshoz készült-e, vagy egy korábbihoz." >&2
+        refuse "C6 — a review nincs futáshoz kötve"
+    fi
+else
+    echo "[WARN] a meta.yaml-ben nincs run_id — ez a job a mező bevezetése"
+    echo "       előttről való. Nem igazolható, melyik futást nézte a review."
+fi
+
+# --- a validált tartalom lenyomata ---
+# Amit a C3 és a C4 megnézett, annak a digestje a metába kerül. Így a done
+# commitból utólag eldönthető, hogy azt a tartalmat zárták-e le, amit a kapu
+# látott.
+RESULT_DIGEST=$(
+    { find "$WORKDIR/jobs/$JOB_ID/output" -type f -print0 2>/dev/null | sort -z | xargs -0r cat
+      cat "$REVIEW"
+    } | sha256sum | cut -d' ' -f1
+)
+
 if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "DRY-RUN: mind a négy feltétel teljesül, a job lezárható."
     exit 0
@@ -147,22 +187,59 @@ fi
 
 # --- transition ---
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-python3 - "$META" "$NOW" <<'PYEOF'
-import re, sys
-meta_path, now = sys.argv[1], sys.argv[2]
-with open(meta_path, encoding="utf-8") as f:
-    content = f.read()
-content = re.sub(r'^status:.*$', 'status: "done"', content, flags=re.MULTILINE)
-content = re.sub(r'^\s+completed:.*$', f'  completed: "{now}"', content, flags=re.MULTILINE)
-with open(meta_path, "w", encoding="utf-8") as f:
-    f.write(content)
-PYEOF
+# A `^\s+completed:` minta MINDEN behúzott completed: sort átírta, nem csak a
+# timestamps alattit -- ugyanaz az osztály, amit a #40 a run-job.sh-ban lezárt.
+# Ez a fájl kimaradt a söprésből.
+#
+# A result_digest azt rögzíti, MIT látott a kapu. A close és a commit között
+# eddig kicserélhető volt az output, és a done commit olyan tartalmat vitt,
+# amit a kapu soha nem látott (#43).
+bash "$WORKDIR/tools/meta-set.sh" "$META" \
+    'status=done' \
+    "timestamps.completed=$NOW" \
+    "result_digest=$RESULT_DIGEST" \
+    "reviewed_run_id=$RUN_ID"
 
 bash "$WORKDIR/tools/update-index.sh"
 
 echo "[✓] $JOB_ID — done ($NOW)"
-echo ""
-echo "A commit a tiéd — az a Vault-aláírt bizonyíték:"
-echo "  git add jobs/$JOB_ID/ jobs/index.yaml   # + a sub-job specek, ha vannak"
-echo "  git commit -m \"job: $JOB_ID — done + output + review\""
-echo "  git push"
+
+# Mérve (#43): a close eddig nem commitolt, csak kiírta a parancsokat. A
+# validáció és a kézi commit között az output kicserélhető volt, és a done
+# commit olyan tartalmat vitt, amit a kapu soha nem látott. Ehhez nem kellett
+# se két attempt, se két folyamat.
+#
+# Ezért a close commitolja azt, amit validált. A commit továbbra is
+# Vault-aláírt: a commit-msg hook ugyanúgy lefut.
+if [[ "$NO_COMMIT" -eq 1 ]]; then
+    echo ""
+    echo "[!] --no-commit: a lezárás megtörtént, de a commit a tiéd."
+    echo "    A validáció és a commit között a tartalom megváltozhat — a"
+    echo "    meta result_digest mezője rögzíti, mit látott a kapu:"
+    echo "      $RESULT_DIGEST"
+    echo "  git add jobs/$JOB_ID/ jobs/index.yaml"
+    echo "  git commit -m \"job: $JOB_ID — done + output + review\""
+    echo "  git push"
+else
+    # A `set -e` miatt guard: egy nem-git munkafában a lezárás ugyanúgy
+    # megtörtént, csak nincs mit commitolni.
+    if ! git -C "$WORKDIR" rev-parse --git-dir >/dev/null 2>&1; then
+        echo "[!] $WORKDIR nem git munkafa — a lezárás megtörtént, commit nincs." >&2
+        exit 0
+    fi
+    git -C "$WORKDIR" add "jobs/$JOB_ID/meta.yaml" "jobs/$JOB_ID/review.md" \
+        "jobs/$JOB_ID/output" jobs/index.yaml || true
+    if git -C "$WORKDIR" commit -q -m "job: $JOB_ID — done + output + review" \
+           -- "jobs/$JOB_ID/meta.yaml" "jobs/$JOB_ID/review.md" \
+              "jobs/$JOB_ID/output" jobs/index.yaml; then
+        echo "[*] Commitolva — pontosan az a tartalom, amit a kapu látott."
+        if git -C "$WORKDIR" push -q 2>/dev/null; then
+            echo "[*] Kipusholva."
+        else
+            echo "[!] A push nem sikerült; a commit helyben megvan." >&2
+            echo "    git -C $WORKDIR push" >&2
+        fi
+    else
+        echo "[!] A commit nem sikerült. A meta done, de a bizonyíték nincs kint." >&2
+    fi
+fi

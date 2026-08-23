@@ -64,6 +64,11 @@ run_id: ""                  # a futási kísérlet azonosítója; a running átm
                             # régi futás nem veheti vissza azt a jobot, amit
                             # közben egy újabb attempt birtokol.
 attempt: ""                 # hányadik kísérlet; a running átmenet lépteti.
+result_digest: ""           # a lezáráskor validált tartalom (output/ + review.md)
+                            # sha256 lenyomata; a close-job.sh írja. Ebből
+                            # utólag eldönthető, hogy a done commit azt
+                            # hordozza-e, amit a kapu látott.
+reviewed_run_id: ""         # melyik futás eredményét zárta le a close.
 error_message: ""           # only when status: error
 
 # Usage — written by run-job.sh from `claude --output-format json`.
