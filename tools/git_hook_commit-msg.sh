@@ -67,21 +67,34 @@ if ! TREE_ID=$(git write-tree 2>/dev/null); then
   exit 0
 fi
 
-# Kibontjuk, majd determinisztikus tar streamet készítünk.
+# ===== Kanonikus manifest (cic-tree-manifest/v2) =====
 #
-# The umask is pinned because `tar -x` applies it to the extracted modes, so the
-# digest depended on whoever happened to be committing: the same tree signed
-# under umask 002 and under 022 produced different digests, and verification
-# then failed anywhere the umask differed. Found when the CI runner (022) could
-# not verify a commit signed on a workstation (002).
+# Az aláírt payload eddig egy `git archive` + `tar` roundtrip sha256-ja volt.
+# Két baja volt, és az egyik mérve:
 #
-# 022 is chosen because it is the common default; changing it again would
-# invalidate verification of everything signed before the change.
-umask 022
-git archive --format=tar "$TREE_ID" | tar -xf - -C "$tmpdir"
-DIGEST_B64=$(tar --sort=name --mtime='UTC 1970-01-01' \
-  --owner=0 --group=0 --numeric-owner -cf - -C "$tmpdir" . \
-  | openssl dgst -sha256 -binary | openssl base64 -A)
+#   1. A git archive a GITLINKET üres könyvtárként írja. Két fa, ami CSAK a
+#      submodule commitjában tér el, azonos digestet adott — aláírás-kollízió
+#      a repository saját objektummodelljén belül (#38).
+#
+#   2. A digest a tar kódolásától és a kibontó umaskjától függött, nem a Git
+#      objektummodelljétől. A verifier ezért négy umaskot próbál végig.
+#
+# A v2 manifest a Git fáját írja le közvetlenül: minden bejegyzés mode, típus,
+# OID és path — a gitlink is, `commit` típussal. Nincs fájlrendszer az útban,
+# tehát nincs umask, nincs tar-formátum, és a submodule sem tűnik el.
+#
+# Verziózott: a régi aláírások a v1 (tar) úton ellenőrizhetők tovább, a
+# verify-signatures.sh mindkettőt tudja.
+MANIFEST_VERSION="cic-tree-manifest/v2"
+OBJECT_FORMAT=$(git rev-parse --show-object-format 2>/dev/null || echo sha1)
+
+DIGEST_B64=$( {
+    printf '%s\n' "$MANIFEST_VERSION"
+    printf 'object-format: %s\n' "$OBJECT_FORMAT"
+    printf 'tree: %s\n' "$TREE_ID"
+    # LC_ALL=C: a rendezés ne függjön a futtató locale-jától.
+    git ls-tree -r -t "$TREE_ID" | LC_ALL=C sort
+  } | openssl dgst -sha256 -binary | openssl base64 -A )
 
 # ===== Vault aláírás =====
 SIGNATURE_RESPONSE=$(curl --config "$CURL_CFG" \
@@ -122,6 +135,7 @@ fi
   echo "key = $KEY_NAME"
   echo "signature = $SIGNATURE"
   echo "hash-algorithm = sha256"
+  echo "manifest = $MANIFEST_VERSION"
   echo "digest = $DIGEST_B64"
   echo ""
   echo "[certificate]"

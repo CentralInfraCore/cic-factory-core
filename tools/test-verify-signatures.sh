@@ -55,6 +55,29 @@ sign_head() {
     git -C "$repo" commit -q --amend -F "$KEYDIR/msg" --no-verify
 }
 
+# A v2 manifest: ugyanaz a számítás, mint a hookban és a verifierben.
+manifest_v2() {
+    local repo="$1" tree="$2"
+    { printf 'cic-tree-manifest/v2\n'
+      printf 'object-format: %s\n' "$(git -C "$repo" rev-parse --show-object-format 2>/dev/null || echo sha1)"
+      printf 'tree: %s\n' "$tree"
+      git -C "$repo" ls-tree -r -t "$tree" | LC_ALL=C sort
+    } | openssl dgst -sha256 -binary | openssl base64 -A
+}
+sign_head_v2() {
+    local repo="$1" digest sig
+    digest=$(manifest_v2 "$repo" "$(git -C "$repo" rev-parse 'HEAD^{tree}')")
+    printf '%s' "$digest" | base64 -d > "$KEYDIR/d.bin"
+    openssl pkeyutl -sign -inkey "$KEYDIR/key.pem" -in "$KEYDIR/d.bin" -out "$KEYDIR/s.der" 2>/dev/null
+    sig="vault:v1:$(base64 -w0 < "$KEYDIR/s.der")"
+    {
+        git -C "$repo" log -1 --format=%B
+        printf -- '---\n[signing-metadata]\nkey = test\nsignature = %s\nhash-algorithm = sha256\nmanifest = cic-tree-manifest/v2\ndigest = %s\n\n[certificate]\n' "$sig" "$digest"
+        cat "$KEYDIR/cert.pem"
+    } > "$KEYDIR/msg"
+    git -C "$repo" commit -q --amend -F "$KEYDIR/msg" --no-verify
+}
+
 mkrepo() {
     local r; r=$(mktemp -d)
     git -C "$r" init -q
@@ -172,6 +195,67 @@ check "merge commiton → elutasít" "1" "$(run "$R" --tag rel/@bad)"
 check_log "  megmondja mit tegyél" "tedd az aláírt szülőre" "$R/out.log"
 check "aláírt commiton → átmegy" "0" "$(run "$R" --tag rel/@good)"
 rm -rf "$R"
+
+echo
+echo "v2 manifest — aláírt commit átmegy"
+R=$(mkrepo); BASE=$(git -C "$R" rev-parse HEAD)
+printf 'x\n' > "$R/v2.txt"; git -C "$R" add -A; git -C "$R" commit -q -m "v2" --no-verify
+sign_head_v2 "$R"
+check "átmegy" "0" "$(run "$R" --range "$BASE..HEAD")"
+rm -rf "$R"
+
+echo
+echo "  v2: megváltoztatott fa elbukik"
+R=$(mkrepo); BASE=$(git -C "$R" rev-parse HEAD)
+printf 'x\n' > "$R/v2.txt"; git -C "$R" add -A; git -C "$R" commit -q -m "v2" --no-verify
+sign_head_v2 "$R"
+printf 'MAS\n' > "$R/v2.txt"; git -C "$R" add -A
+git -C "$R" commit -q --amend --no-edit --no-verify
+check "elutasít" "1" "$(run "$R" --range "$BASE..HEAD")"
+check_log "  a v2 manifestre hivatkozik" "v2 manifest" "$R/out.log"
+rm -rf "$R"
+
+echo
+echo "  ismeretlen manifest-verzió elutasításra kerül"
+R=$(mkrepo); BASE=$(git -C "$R" rev-parse HEAD)
+printf 'x\n' > "$R/v2.txt"; git -C "$R" add -A; git -C "$R" commit -q -m "v2" --no-verify
+sign_head_v2 "$R"
+git -C "$R" log -1 --format=%B | sed 's|cic-tree-manifest/v2|cic-tree-manifest/v9|' > "$KEYDIR/m9"
+git -C "$R" commit -q --amend -F "$KEYDIR/m9" --no-verify
+check "elutasít" "1" "$(run "$R" --range "$BASE..HEAD")"
+check_log "  megnevezi" "ismeretlen manifest-verzió" "$R/out.log"
+rm -rf "$R"
+
+echo
+echo "  a v1 (manifest-sor nélküli) aláírás továbbra is verifikál"
+# Ez a kompatibilitási teszt: a v2 előtti commitok nem válhatnak
+# ellenőrizhetetlenné attól, hogy a hook azóta mást ír.
+R=$(mkrepo); BASE=$(git -C "$R" rev-parse HEAD); add_signed "$R" regi
+check "átmegy" "0" "$(run "$R" --range "$BASE..HEAD")"
+rm -rf "$R"
+
+echo
+echo "  GITLINK-csere elutasításra kerül (#38)"
+# A v1 a submodule commitját üres könyvtárként vitte: két fa, ami CSAK ebben
+# tért el, azonos digestet adott. Ez volt a kollízió.
+R=$(mkrepo); BASE=$(git -C "$R" rev-parse HEAD)
+M=$(mktemp -d); git -C "$M" init -q
+git -C "$M" config user.email m@m; git -C "$M" config user.name m
+printf 'egy\n' > "$M/f"; git -C "$M" add -A; git -C "$M" commit -q -m one --no-verify
+SUB_A=$(git -C "$M" rev-parse HEAD)
+printf 'ketto\n' > "$M/f"; git -C "$M" add -A; git -C "$M" commit -q -m two --no-verify
+SUB_B=$(git -C "$M" rev-parse HEAD)
+git -C "$R" -c protocol.file.allow=always submodule add -q "$M" sub 2>/dev/null
+git -C "$R/sub" checkout -q "$SUB_A"
+git -C "$R" add -A; git -C "$R" commit -q -m "submodule A" --no-verify
+sign_head_v2 "$R"
+D_A=$(manifest_v2 "$R" "$(git -C "$R" rev-parse 'HEAD^{tree}')")
+git -C "$R/sub" checkout -q "$SUB_B"
+git -C "$R" add sub; git -C "$R" commit -q --amend --no-edit --no-verify
+D_B=$(manifest_v2 "$R" "$(git -C "$R" rev-parse 'HEAD^{tree}')")
+check "a két digest KÜLÖNBÖZIK" "1" "$([ "$D_A" != "$D_B" ] && echo 1 || echo 0)"
+check "  és a verifier elutasítja a cserét" "1" "$(run "$R" --range "$BASE..HEAD")"
+rm -rf "$R" "$M"
 
 echo
 echo "==== $pass PASS / $fail FAIL ===="

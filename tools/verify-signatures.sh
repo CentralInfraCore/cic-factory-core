@@ -76,6 +76,23 @@ tree_digest() {
     printf '%s' "$out"
 }
 
+# cic-tree-manifest/v2: a Git fáját írja le közvetlenül, minden bejegyzés mode,
+# típus, OID és path -- a GITLINK is, `commit` típussal.
+#
+# A v1 (tar roundtrip) a gitlinket üres könyvtárként vitte: két fa, ami csak a
+# submodule commitjában tért el, azonos digestet adott (#38). Nincs benne
+# fájlrendszer, tehát umask sincs.
+manifest_digest_v2() {
+    # A hívó revízió-kifejezést ad (`<sha>^{tree}`); a manifestbe a FELOLDOTT
+    # OID tartozik, mert a hook is azt írja (git write-tree).
+    local tree; tree=$(git rev-parse "$1" 2>/dev/null) || tree="$1"
+    { printf 'cic-tree-manifest/v2\n'
+      printf 'object-format: %s\n' "$(git rev-parse --show-object-format 2>/dev/null || echo sha1)"
+      printf 'tree: %s\n' "$tree"
+      git ls-tree -r -t "$tree" | LC_ALL=C sort
+    } | openssl dgst -sha256 -binary | openssl base64 -A
+}
+
 # Returns the umask that reproduces $2, or empty.
 matching_umask() {
     local tree="$1" want="$2" m
@@ -98,16 +115,28 @@ verify_commit() {
         return 1
     fi
 
-    local mask
-    if ! mask=$(matching_umask "$c^{tree}" "$rec"); then
-        echo "    a digest NEM a saját fájára illik (egyik umask mellett sem)"
-        echo "      rögzített:   ${rec:0:32}…"
-        echo "      újraszámolt: $(tree_digest "$c^{tree}" 022 | cut -c1-32)… (umask 022)"
-        return 1
-    fi
-    if [[ "$mask" != "022" ]]; then
-        echo "    (a digest umask $mask mellett jön ki — a hook 022-t rögzít azóta)"
-    fi
+    local manifest mask
+    manifest=$(grep -oP '^manifest = \K\S+' <<<"$msg" | head -1)
+    case "$manifest" in
+        cic-tree-manifest/v2)
+            if [[ "$(manifest_digest_v2 "$c^{tree}")" != "$rec" ]]; then
+                echo "    a digest NEM a saját fájára illik (v2 manifest)"
+                echo "      rögzített:   ${rec:0:32}…"
+                echo "      újraszámolt: $(manifest_digest_v2 "$c^{tree}" | cut -c1-32)…"
+                return 1
+            fi
+            ;;
+        "")
+            if ! mask=$(matching_umask "$c^{tree}" "$rec"); then
+                echo "    a digest NEM a saját fájára illik (egyik umask mellett sem)"
+                echo "      rögzített:   ${rec:0:32}…"
+                echo "      újraszámolt: $(tree_digest "$c^{tree}" 022 | cut -c1-32)… (umask 022)"
+                return 1
+            fi
+            [[ "$mask" == "022" ]] || echo "    (v1 manifest, umask $mask — a hook azóta v2-t ír)"
+            ;;
+        *)  echo "    ismeretlen manifest-verzió: $manifest"; return 1 ;;
+    esac
 
     tmp=$(mktemp -d) || return 1
     sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' <<<"$msg" > "$tmp/cert.pem"
