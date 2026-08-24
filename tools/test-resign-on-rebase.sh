@@ -65,7 +65,7 @@ mkrepo() {   # <név>
     git -C "$r" config user.name  "Suite Sandor"
     git -C "$r" config commit.gpgsign false
     git -C "$r" config core.hooksPath "$r/hooks"
-    cp "$VERIFY" "$RESIGN" "$r/tools/"
+    cp "$VERIFY" "$RESIGN" "$SRC/lib-vault-sign.sh" "$r/tools/"
     cat > "$r/hooks/commit-msg" <<HK
 #!/usr/bin/env bash
 export PATH="$ENVROOT/bin:\$PATH"

@@ -32,8 +32,12 @@ ROOT=$(mktemp -d); trap 'rm -rf "$ROOT"' EXIT
 mkfix() {   # <név>
     local r="$ROOT/$1"
     mkdir -p "$r/tools" "$r/shared"
-    cp "$SRC/git_hook_commit-msg.sh" "$SRC/check-hook-provenance.sh" \
-       "$SRC/init-hooks.sh" "$r/tools/"
+    # lib-vault-sign.sh is a sibling dependency of the shipped hook (#82's
+    # lesson generalises: a copy is only faithful if EVERYTHING it needs travels
+    # with it). Missing it here would make both the shipped and the effective
+    # probe fail identically, and the diff would show no difference by accident.
+    cp "$SRC/git_hook_commit-msg.sh" "$SRC/lib-vault-sign.sh" \
+       "$SRC/check-hook-provenance.sh" "$SRC/init-hooks.sh" "$r/tools/"
     git -C "$r" init -q
     git -C "$r" config user.email t@t
     git -C "$r" config user.name t

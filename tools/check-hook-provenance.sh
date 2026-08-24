@@ -113,6 +113,11 @@ probe_run() {   # <hook> <kimenet>
     git -C "$r" init -q
     git -C "$r" config user.email probe@invalid
     git -C "$r" config user.name  "Provenance Probe"
+    # A hook a lib-vault-sign.sh-t a SAJÁT repója gyökeréhez képest keresi (nem
+    # a hook-fájl saját könyvtárához képest -- lásd a hook megjegyzését), ezért
+    # a próba-repónak is hordoznia kell egy másolatot.
+    mkdir -p "$r/tools"
+    cp "$WORKDIR/tools/lib-vault-sign.sh" "$r/tools/"
     printf 'proba tartalom\n' > "$r/f.txt"
     git -C "$r" add f.txt
     printf 'proba uzenet\n' > "$r/msg.txt"
