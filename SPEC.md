@@ -400,6 +400,27 @@ Amire az aláírás **nem** véd: ha maga az újraaláíró eszköz csonkítja a
 a verifikáció ezt nem veszi észre — az eszköz azt írja alá, amit előállított. Ezt
 csak tartalmi állítás fogja meg, ezért van rá külön eset a suite-ban.
 
+**Tag-verifikáció és tartalom nélküli merge-lánc (#44):** a `--tag` út eddig
+minden merge commitra mutató tag-et elutasított, függetlenül attól, hoz-e
+tartalmat. A release folyamat (feature branch → PR → merge → tag a main-en)
+miatt egy release tag **mindig** merge commitra mutat — mérve mind a három
+addig kiadott release tag (`v0.2.0`, `v0.2.1`, `v0.3.0`) NO-GO-t adott, holott a
+tartalmuk valódi, aláírt commithoz vezet vissza egy vagy több tartalom nélküli
+merge-ön át.
+
+A verifier most a `--range` útnál már meglévő szabályt (a merge fája egyezik-e
+valamelyik szülő fájával — ha igen, a merge nem hoz tartalmat, a tartalmat a
+szülő hordozza) alkalmazza a `--tag` útra is: a tag célpontjáról a tartalom
+nélküli merge-eken át visszalépked az első olyan commitig, ami vagy nem merge,
+vagy maga hoz tartalmat, és **azt** ellenőrzi. Mind a három meglévő release tag
+most GO-t ad.
+
+**Amit ez NEM ad:** a tag objektum maga továbbra sincs Vault-aláírva — a
+verifikáció a tagen KERESZTÜL a mögötte álló, valóban aláírt commitig jut el, de
+a tag nevét, a taggert és a tag üzenetét semmi nem köti. Az "annotated, signed
+release tags" #44-es elfogadási pont ezért csak **részben** teljesül: a tag
+konzisztensen ellenőrizhető, de nem önmagában aláírt.
+
 A v1 (tar-alapú) és a v2 aláírások továbbra is ellenőrizhetők; a verifier a
 blokkban álló manifest-verzió szerint dönt, ismeretlen verziót pedig elutasít.
 

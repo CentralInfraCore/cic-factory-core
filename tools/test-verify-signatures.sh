@@ -185,15 +185,70 @@ echo
 echo "6. Tag aláírt commiton / merge commiton"
 R=$(mkrepo)
 git -C "$R" checkout -q -b side3; add_signed "$R" side3
-git -C "$R" checkout -q -; git -C "$R" merge -q --no-ff -m "Merge side3" side3 --no-verify
+git -C "$R" checkout -q -
+# EZ a merge TARTALMAT hoz: a base-en is történt egy önálló, aláíratlan
+# változás, tehát a merge fája nem egyezik SEM az egyik, SEM a másik szülő
+# fájával. A merge maga marad az, amit ellenőrizni kell — és aláíratlan.
+printf 'base valtozas\n' > "$R/base-change.txt"
+git -C "$R" add -A; git -C "$R" commit -q -m "base halad" --no-verify
+git -C "$R" merge -q --no-ff -m "Merge side3" side3 --no-verify
 git -C "$R" tag rel/@bad HEAD
-# Az aláírt commitot néven kell megfogni. A `rev-list -1 --no-merges HEAD`
-# csábító, de a merge ELSŐ szülőjét járja előbb — itt az init-et adná vissza,
-# nem a side3 aláírt csúcsát.
 git -C "$R" tag rel/@good side3
-check "merge commiton → elutasít" "1" "$(run "$R" --tag rel/@bad)"
-check_log "  megmondja mit tegyél" "tedd az aláírt szülőre" "$R/out.log"
+check "tartalmat hozó, aláíratlan merge → elutasít" "1" "$(run "$R" --tag rel/@bad)"
+# A merge MAGA az, amit ellenőrizni kell -- nem szabad tovább lépnie egy
+# szülőre. Ha mégis (pl. az introduces-jelző hibás), a resolver egy üres
+# revízióra fut ki, ami git "fatal:" hibaüzeneteket ad, és a "tartalom
+# nélküli merge-eken át" sort is kiírná, holott itt nincs ilyen lépés.
+check "  nem hivatkozik tovább nem létező szülőre" "0" \
+    "$(grep -c 'tartalom nélküli merge-eken át' "$R/out.log")"
+check "  és nincs git hibaüzenet a kimenetben" "0" "$(grep -c '^fatal:' "$R/out.log")"
 check "aláírt commiton → átmegy" "0" "$(run "$R" --tag rel/@good)"
+rm -rf "$R"
+
+echo
+echo "  a release tag TARTALOM NÉLKÜLI merge-ön keresztül is átmegy (#44)"
+# Ez a valódi hiba, mérve: a release folyamat (feature branch -> PR -> merge ->
+# tag main) miatt a release tag MINDIG merge commitra mutat. A régi szabály
+# minden merge-öt elutasított, ezért mind a három létező release tag
+# (v0.2.0, v0.2.1, v0.3.0) NO-GO-t adott — a tartalom valójában egy valódi
+# aláírt commithoz vezet vissza egy tartalom nélküli merge-ön át.
+R=$(mkrepo)
+git -C "$R" checkout -q -b release; add_signed "$R" release
+git -C "$R" checkout -q -
+git -C "$R" merge -q --no-ff -m "Merge release" release --no-verify
+git -C "$R" tag rel/@ff HEAD
+check "átmegy, és megnevezi az áthaladt merge-öt" "0" "$(run "$R" --tag rel/@ff)"
+check_log "  megnevezi a talált commitot" "tartalom nélküli merge-eken át" "$R/out.log"
+rm -rf "$R"
+
+echo
+echo "  ...és LÁNCOLT, több szintes tartalom nélküli merge-ön is (nem csak egy ugrás)"
+# Ha a resolver csak EGY szintet lépne vissza, ez az eset zölden maradna
+# helytelenül egy második merge beiktatása után.
+R=$(mkrepo)
+git -C "$R" checkout -q -b release; add_signed "$R" release
+git -C "$R" checkout -q -
+git -C "$R" merge -q --no-ff -m "Merge release (1)" release --no-verify
+git -C "$R" checkout -q -b integration
+git -C "$R" checkout -q -
+git -C "$R" merge -q --no-ff -m "Merge release (2, ures)" integration --no-verify
+git -C "$R" tag rel/@deep HEAD
+check "két szintes lánc végén is átmegy" "0" "$(run "$R" --tag rel/@deep)"
+rm -rf "$R"
+
+echo
+echo "  tartalom nélküli merge egy ALÁÍRATLAN commit fölött → elutasít"
+# A lánc végén álló commit maga nincs aláírva. A merge-ök önmagukban nem
+# adhatnak evidenciát — a láncnak valódi aláíráshoz kell vezetnie.
+R=$(mkrepo)
+git -C "$R" checkout -q -b unsigned_side
+printf 'nincs alairva\n' > "$R/u.txt"; git -C "$R" add -A
+git -C "$R" commit -q -m "nincs alairva" --no-verify
+git -C "$R" checkout -q -
+git -C "$R" merge -q --no-ff -m "Merge unsigned_side" unsigned_side --no-verify
+git -C "$R" tag rel/@hollow HEAD
+check "elutasít" "1" "$(run "$R" --tag rel/@hollow)"
+check_log "  megmutatja, hova jutott" "az sem verifikál" "$R/out.log"
 rm -rf "$R"
 
 echo
