@@ -384,9 +384,21 @@ sem tudja: a `commit-msg` hook akkor fut, amikor a commit még nem létezik. A
 szülők, a branch, a tag és a lifecycle-jelentés szintén nincsenek bekötve. A
 committer *dátuma* nincs kötve — csak a neve és e-mail címe.
 
-**Fa-kötés és rebase:** egy rebase, ami ténylegesen új alap fölé viszi az ágat,
-megváltoztatja a commit fáját is, és így érvényteleníti az aláírását. Ez **nem**
-v3-tulajdonság: a v1 és a v2 ugyanígy viselkedik, mert mindkettő a fát köti.
+**Fa-kötés és rebase (#81):** egy rebase, ami ténylegesen új alap fölé viszi az
+ágat, megváltoztatja a commit fáját is, és így érvényteleníti az aláírását. Ez
+**nem** v3-tulajdonság: a v1 és a v2 ugyanígy viselkedik, mert mindkettő a fát
+köti. A hatás **nem részleges** — mérve, három commitos ágon rebase után OK: 0,
+FAIL: 3.
+
+A `git rebase` nem futtatja újra a `commit-msg` hookot: a régi blokkot
+változatlanul viszi át. A helyes válasz nem az elavult aláírás elfogadása, hanem
+az **újraaláírás** — a `tools/resign-range.sh` `git rebase --exec`-kel minden
+áthelyezett commitra friss Vault-aláírást kér. A `post-rewrite` hook helyben szól,
+ha egy átírás elavult blokkot hagyott, hogy ez ne a CI-ban derüljön ki.
+
+Amire az aláírás **nem** véd: ha maga az újraaláíró eszköz csonkítja az üzenetet,
+a verifikáció ezt nem veszi észre — az eszköz azt írja alá, amit előállított. Ezt
+csak tartalmi állítás fogja meg, ezért van rá külön eset a suite-ban.
 
 A v1 (tar-alapú) és a v2 aláírások továbbra is ellenőrizhetők; a verifier a
 blokkban álló manifest-verzió szerint dönt, ismeretlen verziót pedig elutasít.

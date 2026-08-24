@@ -63,6 +63,19 @@ echo "[*] Symlinking commit-msg hook from tools directory..."
 ln -s -f "../../tools/git_hook_commit-msg.sh" "$COMMIT_MSG_HOOK"
 echo "  ✓ Done."
 
+# post-rewrite: after a rebase the commit-msg hook does not re-run, so the block
+# a commit carries is the one signed for its OLD tree. Measured (#81): every
+# commit on a rebased branch stops verifying, not just some. Without this hook
+# that surfaces in CI after opening a PR; with it, right after the rebase.
+POST_REWRITE_HOOK="$HOOKS_DIR/post-rewrite"
+if [ -f "$POST_REWRITE_HOOK" ] && [ ! -L "$POST_REWRITE_HOOK" ]; then
+    echo "[INFO] A post-rewrite hook already exists. Backing it up to post-rewrite.bak."
+    mv "$POST_REWRITE_HOOK" "$POST_REWRITE_HOOK.bak"
+fi
+echo "[*] Symlinking post-rewrite hook from tools directory..."
+ln -s -f "../../tools/git_hook_post-rewrite.sh" "$POST_REWRITE_HOOK"
+echo "  ✓ Done."
+
 # A symlink cannot go stale, but a wrapper or a hand-placed copy can. Prove the
 # hook now in effect is the one this repository ships, rather than assuming the
 # install worked.
