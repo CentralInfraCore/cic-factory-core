@@ -136,6 +136,11 @@ jobs:
       - name: a rebase leaves signatures re-signable
         run: bash tools/test-resign-on-rebase.sh
 
+      # A release tag maga is Vault-tal aláírva -- a nevét, célpontját, taggerét
+      # és üzenetét semmi nem kötötte eddig, csak a mögötte álló commitot.
+      - name: signed release tags round-trip
+        run: bash tools/test-sign-release-tag.sh
+
       # A repó nem azzal a hookkal írt alá, amit kiad: a core.hooksPath egy repón
       # kívüli megosztott könyvtárra mutatott, benne a signer elavult másolatával
       # (#82). A CI-ban nincs hook telepítve, ezért itt a CHECKER-t mérjük

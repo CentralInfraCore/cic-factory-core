@@ -91,7 +91,7 @@ HK
     # különben a hívó repóját ellenőrizné. (Ez pontosan úgy sült ki, ahogy a
     # verifier saját fejléce leírja: némán a rossz repót nézte.)
     mkdir -p "$r/tools"
-    cp "$VERIFY" "$r/tools/"
+    cp "$VERIFY" "$SRC/lib-vault-sign.sh" "$r/tools/"
     # Alap-commit, hogy legyen mihez képest range-elni. A hook nem fut rá:
     # a --no-verify pont ezt kerüli ki, és a v1-es múltat is ez modellezi.
     printf 'base\n' > "$r/.base"

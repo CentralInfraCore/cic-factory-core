@@ -40,6 +40,9 @@ set -uo pipefail
 WORKDIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$WORKDIR" || exit 1
 
+# shellcheck source=lib-tag-manifest.sh
+source "$WORKDIR/tools/lib-tag-manifest.sh"
+
 RANGE=""
 TAG=""
 while [[ $# -gt 0 ]]; do
@@ -249,6 +252,68 @@ resolve_content_commit() {
     done
 }
 
+# verify_tag_object <tag-ref> -- ellenőrzi, hogy MAGA a tag objektum (nem a
+# célpont commitja) alá van-e írva a cic-tag-manifest/v1-gyel (#44).
+#
+# Visszatérési kódok:
+#   0  a tag maga is aláírva, és a digest+ECDSA rendben
+#   1  van signing-metadata a tag üzenetében, de NEM stimmel -- FAIL
+#   2  a tag objektum nem hordoz signing-metadata blokkot (régi/kézi tag,
+#      vagy lightweight tag) -- ez NEM hiba, csak hiányzó plusz-evidencia
+verify_tag_object() {
+    local ref="$1" full msg name target tagger_raw tagger rec sig manifest body calc tmp
+    if [[ "$(git cat-file -t "$ref" 2>/dev/null)" != "tag" ]]; then
+        return 2
+    fi
+    full=$(git cat-file tag "$ref" 2>/dev/null) || return 2
+    msg=$(awk 'f{print} /^$/{f=1}' <<<"$full")
+    name=$(awk '/^tag /{print substr($0,5); exit}' <<<"$full")
+    target=$(awk '/^object /{print substr($0,8); exit}' <<<"$full")
+    tagger_raw=$(awk '/^tagger /{print substr($0,8); exit}' <<<"$full")
+    if [[ -z "$name" || -z "$target" ]]; then
+        echo "    a tag objektum fejléce nem értelmezhető"
+        return 1
+    fi
+
+    rec=$(grep -oP '^digest = \K\S+' <<<"$msg" | head -1)
+    sig=$(grep -oP '^signature = vault:v1:\K\S+' <<<"$msg" | head -1)
+    if [[ -z "$rec" || -z "$sig" ]]; then
+        return 2
+    fi
+    manifest=$(grep -oP '^manifest = \K\S+' <<<"$msg" | head -1)
+    if [[ "$manifest" != "cic-tag-manifest/v1" ]]; then
+        echo "    ismeretlen tag-manifest verzió: $manifest"
+        return 1
+    fi
+
+    tagger=$(tag_normalize_ident "$tagger_raw")
+    body=$(tag_strip_signing_block "$msg")
+    calc=$(tag_manifest_digest_v1 "$name" "$target" "$tagger" "$body")
+    if [[ "$calc" != "$rec" ]]; then
+        echo "    a tag-digest NEM erre a tagre illik (cic-tag-manifest/v1)"
+        echo "      rögzített:   ${rec:0:32}…"
+        echo "      újraszámolt: ${calc:0:32}…"
+        echo "      a tag neve, célpontja, taggere vagy üzenete eltér attól, amit aláírtunk"
+        return 1
+    fi
+
+    tmp=$(mktemp -d) || return 1
+    sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' <<<"$msg" > "$tmp/cert.pem"
+    if ! openssl x509 -in "$tmp/cert.pem" -noout -pubkey > "$tmp/pub.pem" 2>/dev/null; then
+        echo "    nincs értelmezhető tanúsítvány a tag üzenetében"
+        rm -rf "$tmp"; return 1
+    fi
+    base64 -d <<<"$sig" > "$tmp/sig.der" 2>/dev/null
+    base64 -d <<<"$rec" > "$tmp/dig.bin" 2>/dev/null
+    if ! openssl pkeyutl -verify -pubin -inkey "$tmp/pub.pem" \
+            -in "$tmp/dig.bin" -sigfile "$tmp/sig.der" >/dev/null 2>&1; then
+        echo "    a tag ECDSA aláírása NEM érvényes a tanúsítványra"
+        rm -rf "$tmp"; return 1
+    fi
+    rm -rf "$tmp"
+    return 0
+}
+
 if [[ -n "$RANGE" ]]; then
     if ! mapfile -t COMMITS < <(git rev-list "$RANGE" 2>/dev/null) || [[ ${#COMMITS[@]} -eq 0 ]]; then
         # An empty or unresolvable range used to print GO, which is the worst
@@ -302,21 +367,40 @@ if [[ -n "$TAG" ]]; then
         resolved=$(resolve_content_commit "$c")
         resolve_rc=$?
         target_desc=$(git log -1 --format='%h %s' "$c" | cut -c1-58)
+        content_pass=1
         if [[ "$resolve_rc" -ne 0 ]]; then
             echo "  FAIL  $target_desc"
             echo "        a tartalom-nélküli merge-lánc túl mély (>200) — fail closed"
-            fail=$((fail + 1))
+            content_pass=0
         elif verify_commit "$resolved"; then
             echo "  OK    $target_desc"
             if [[ "$resolved" != "$c" ]]; then
                 echo "        a tartalom nélküli merge-eken át: $(git log -1 --format='%h %s' "$resolved" | cut -c1-58)"
             fi
-            ok=$((ok + 1))
         else
             echo "  FAIL  $target_desc"
             if [[ "$resolved" != "$c" ]]; then
                 echo "        a tartalom nélküli merge-eken át: $(git log -1 --format='%h %s' "$resolved" | cut -c1-58) — az sem verifikál"
             fi
+            content_pass=0
+        fi
+
+        # A tartalom-ellenőrzés a MÖGÖTTES commitot nézi. Ez egy MÁSODIK,
+        # független réteg: magát a tag NEVÉT, célpontját, taggerét és üzenetét
+        # köti-e valami (#44). Régi vagy kézzel csinált tagen ez hiányzik --
+        # nem hiba, csak hiányzó plusz-evidencia (rc=2).
+        tag_obj_out=$(verify_tag_object "$TAG")
+        tag_obj_rc=$?
+        case "$tag_obj_rc" in
+            0) echo "  OK    a tag objektum maga is aláírva (cic-tag-manifest/v1)" ;;
+            2) echo "        (a tag objektum maga nincs aláírva — a tartalom-kötés önmagában áll)" ;;
+            *) echo "  FAIL  a tag objektum aláírása hibás:"
+               echo "$tag_obj_out" | sed 's/^/    /' ;;
+        esac
+
+        if [[ "$content_pass" -eq 1 && "$tag_obj_rc" -ne 1 ]]; then
+            ok=$((ok + 1))
+        else
             fail=$((fail + 1))
         fi
     fi

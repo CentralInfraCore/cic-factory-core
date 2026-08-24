@@ -415,11 +415,20 @@ nélküli merge-eken át visszalépked az első olyan commitig, ami vagy nem mer
 vagy maga hoz tartalmat, és **azt** ellenőrzi. Mind a három meglévő release tag
 most GO-t ad.
 
-**Amit ez NEM ad:** a tag objektum maga továbbra sincs Vault-aláírva — a
-verifikáció a tagen KERESZTÜL a mögötte álló, valóban aláírt commitig jut el, de
-a tag nevét, a taggert és a tag üzenetét semmi nem köti. Az "annotated, signed
-release tags" #44-es elfogadási pont ezért csak **részben** teljesül: a tag
-konzisztensen ellenőrizhető, de nem önmagában aláírt.
+**A tag objektum saját aláírása (#44, `tools/sign-release-tag.sh`):** a git nem
+ismer "pre-tag" hookot — a `commit-msg` mintája itt nem alkalmazható, ez a
+script egy explicit lépés a `git tag -a` helyett, nem automatikusan lefutó
+horog. A `cic-tag-manifest/v1` a tag NEVÉT, a CÉLPONT commit OID-ját, a TAGGER
+személyét (dátum nélkül — szimmetrikus a commit v3 döntésével) és az ÜZENET
+digestjét köti. Nem köti a tag objektum SAJÁT OID-ját — az a blokk
+hozzáfűzése UTÁN dől el, önhivatkozás lenne.
+
+A verifier ezt EGY MÁSODIK, független rétegként ellenőrzi a `--tag` úton: a
+mögöttes commit tartalom-ellenőrzése (fenti bekezdés) mellett, ha a tag
+objektum hordoz egy `cic-tag-manifest/v1` blokkot, azt is verifikálja. Egy
+RÉGI, e nélkül készült tag (a `v0.2.0`, `v0.2.1`, `v0.3.0`) továbbra is GO-t
+ad — a tag-szintű kötés hiánya nem hiba, csak hiányzó plusz-evidencia. Egy
+ÚJONNAN aláírt tag mindkét réteget hordozza, és mindkettőnek stimmelnie kell.
 
 A v1 (tar-alapú) és a v2 aláírások továbbra is ellenőrizhetők; a verifier a
 blokkban álló manifest-verzió szerint dönt, ismeretlen verziót pedig elutasít.

@@ -19,6 +19,7 @@ set -uo pipefail
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
 HOOK="$SRC/git_hook_commit-msg.sh"
+HOOKDIR="$SRC"
 TOKEN="hvs.TESTTOKEN0123456789"
 pass=0; fail=0
 
@@ -30,7 +31,9 @@ check() {
 # Git repo + staged tartalom, hogy a `git write-tree` működjön.
 mkenv() {
     local r; r=$(mktemp -d)
-    mkdir -p "$r/repo" "$r/vault" "$r/bin"
+    mkdir -p "$r/repo/tools" "$r/vault" "$r/bin"
+    # A hook a lib-vault-sign.sh-t a SAJÁT repója gyökeréhez képest keresi.
+    cp "$HOOKDIR/lib-vault-sign.sh" "$r/repo/tools/"
     git -C "$r/repo" init -q
     git -C "$r/repo" config user.email t@t
     git -C "$r/repo" config user.name t
