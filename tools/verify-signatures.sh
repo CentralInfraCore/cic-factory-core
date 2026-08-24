@@ -207,6 +207,48 @@ verify_commit() {
     return 0
 }
 
+# resolve_content_commit <c> -- fejti le a TARTALOM NÉLKÜLI merge-öket, amíg egy
+# olyan commithoz nem ér, amit valóban ellenőrizni kell: nem-merge, vagy olyan
+# merge, ami maga hoz tartalmat.
+#
+# Mérve (#44): a --tag path minden merge-re egységesen elutasított, függetlenül
+# attól, hoz-e tartalmat. A release folyamat (feature branch -> PR -> merge ->
+# tag main) miatt a release tag MINDIG merge commitra mutat -- eredmény: mindhárom
+# létező annotált release tag (v0.2.0, v0.2.1, v0.3.0) NO-GO-t adott, holott a
+# tartalmuk valódi, aláírt commithoz vezet vissza egy tartalom nélküli merge-ön
+# át. A --range loop ezt már helyesen kezelte (lásd lent); a --tag path nem
+# használta ugyanazt a logikát.
+#
+# A láncban nem lehet kör: minden lépés egy szigorú ősre lép, a git DAG-ja
+# aciklikus. A mélységi korlát csak túlzottan hosszú láncok ellen fail-closed.
+resolve_content_commit() {
+    local c="$1" depth=0 parents t p introduces matched
+    while :; do
+        depth=$((depth + 1))
+        if [[ "$depth" -gt 200 ]]; then
+            echo "$c"; return 1
+        fi
+        parents=$(git log -1 --format=%P "$c")
+        if [[ $(wc -w <<<"$parents") -le 1 ]]; then
+            echo "$c"; return 0
+        fi
+        t=$(git rev-parse "$c^{tree}")
+        introduces=1
+        matched=""
+        for p in $parents; do
+            if [[ "$(git rev-parse "$p^{tree}")" == "$t" ]]; then
+                introduces=0
+                matched="$p"
+                break
+            fi
+        done
+        if [[ "$introduces" -eq 1 ]]; then
+            echo "$c"; return 0
+        fi
+        c="$matched"
+    done
+}
+
 if [[ -n "$RANGE" ]]; then
     if ! mapfile -t COMMITS < <(git rev-list "$RANGE" 2>/dev/null) || [[ ${#COMMITS[@]} -eq 0 ]]; then
         # An empty or unresolvable range used to print GO, which is the worst
@@ -257,18 +299,24 @@ if [[ -n "$TAG" ]]; then
         fail=$((fail + 1))
     else
         c=$(git rev-list -1 "$TAG")
-        if [[ $(git log -1 --format=%P "$c" | wc -w) -gt 1 ]]; then
-            # A release tag has to name a commit whose own signature covers the
-            # released tree. A merge commit is unsigned by construction, so a tag
-            # on one points at content nothing vouches for.
-            echo "  FAIL  $(git log -1 --format='%h %s' "$c" | cut -c1-58)"
-            echo "        merge commitra mutat — tedd az aláírt szülőre"
+        resolved=$(resolve_content_commit "$c")
+        resolve_rc=$?
+        target_desc=$(git log -1 --format='%h %s' "$c" | cut -c1-58)
+        if [[ "$resolve_rc" -ne 0 ]]; then
+            echo "  FAIL  $target_desc"
+            echo "        a tartalom-nélküli merge-lánc túl mély (>200) — fail closed"
             fail=$((fail + 1))
-        elif verify_commit "$c"; then
-            echo "  OK    $(git log -1 --format='%h %s' "$c" | cut -c1-58)"
+        elif verify_commit "$resolved"; then
+            echo "  OK    $target_desc"
+            if [[ "$resolved" != "$c" ]]; then
+                echo "        a tartalom nélküli merge-eken át: $(git log -1 --format='%h %s' "$resolved" | cut -c1-58)"
+            fi
             ok=$((ok + 1))
         else
-            echo "  FAIL  $(git log -1 --format='%h %s' "$c" | cut -c1-58)"
+            echo "  FAIL  $target_desc"
+            if [[ "$resolved" != "$c" ]]; then
+                echo "        a tartalom nélküli merge-eken át: $(git log -1 --format='%h %s' "$resolved" | cut -c1-58) — az sem verifikál"
+            fi
             fail=$((fail + 1))
         fi
     fi
