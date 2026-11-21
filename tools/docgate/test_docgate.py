@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2025-2026 Sinkó Gábor Zoltán / CentralInfraCore
 """Regression tests of the documentation gate (tools/docgate/docgate.py).
 
 Each case builds a throwaway git repository, runs the gate on it as CI does and checks
@@ -10,7 +12,7 @@ Run: python3 -m unittest discover -s tools/docgate -p "test_*.py"
 
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 -- test fixtures: fixed git and gate invocations, no shell.
 import sys
 import tempfile
 import textwrap
@@ -35,12 +37,16 @@ class Repo:
             (self.dir / ".docgate-exclude").write_text(
                 textwrap.dedent(exclude), encoding="utf-8"
             )
-        subprocess.run(["git", "init", "-q", str(self.dir)], check=True)
-        subprocess.run(["git", "-C", str(self.dir), "add", "-A"], check=True)
+        subprocess.run(
+            ["git", "init", "-q", str(self.dir)], check=True
+        )  # nosec B603 B607
+        subprocess.run(
+            ["git", "-C", str(self.dir), "add", "-A"], check=True
+        )  # nosec B603 B607
 
     def run(self, env: dict | None = None) -> tuple[int, list[str], str]:
         """Run the gate; return (exit status, reported gap lines, stderr)."""
-        res = subprocess.run(
+        res = subprocess.run(  # nosec B603 -- runs this gate with the current interpreter.
             [sys.executable, str(GATE), "--root", str(self.dir)],
             capture_output=True,
             text=True,
