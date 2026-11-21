@@ -8,10 +8,13 @@
 // name) none of whose files carries a package doc. Directive-only comments such as
 // //go:embed or //export do not count as documentation. Blank identifiers are skipped.
 //
-// Usage: godoc <file.go> [<file.go> ...]
+// Usage: godoc <file.go> [<file.go> ...], or the paths on stdin, one per line, when no
+// argument is given (docgate passes every file in one run, so a package's files are
+// never split between runs and its package doc is never reported missing by mistake).
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -57,12 +60,31 @@ func recvName(e ast.Expr) string {
 	return ""
 }
 
-// main checks every file named on the command line and prints the gaps as JSON.
+// inputPaths returns the files to check: the arguments, or the non-empty lines of stdin.
+func inputPaths() []string {
+	if len(os.Args) > 1 {
+		return os.Args[1:]
+	}
+	var paths []string
+	sc := bufio.NewScanner(os.Stdin)
+	for sc.Scan() {
+		if p := strings.TrimSpace(sc.Text()); p != "" {
+			paths = append(paths, p)
+		}
+	}
+	if err := sc.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "godoc: reading stdin: %v\n", err)
+		os.Exit(1)
+	}
+	return paths
+}
+
+// main checks every input file and prints the gaps as JSON.
 func main() {
 	gaps := []string{}
 	pkgs := map[pkgKey]*pkgState{}
 	fset := token.NewFileSet()
-	for _, path := range os.Args[1:] {
+	for _, path := range inputPaths() {
 		f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "godoc: %v\n", err)

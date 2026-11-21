@@ -8,14 +8,31 @@
 //! `impl Trait for X` (they inherit the trait's doc), modules (their own file carries the doc)
 //! and anything under `#[test]` / `#[cfg(test)]` are skipped.
 //!
-//! Usage: `rsdoc <file.rs> [<file.rs> ...]`
+//! Only a `#[doc = ...]` with non-empty text (what `///` and `//!` produce), or one whose value
+//! is a macro such as `include_str!`, counts as documentation; `#[doc(hidden)]` and the like
+//! do not.
+//!
+//! Usage: `rsdoc <file.rs> [<file.rs> ...]`, or the paths on stdin, one per line, when no
+//! argument is given.
 
 use std::process::ExitCode;
 use syn::{Attribute, ImplItem, Item};
 
-/// Whether the attributes carry an outer doc comment (`///` lines become `#[doc = "…"]`).
+/// Whether the attributes carry documentation text: a `#[doc = "..."]` (what `///` and `//!`
+/// become) whose string is not blank, or whose value is a macro (`include_str!`).
+/// `#[doc(hidden)]`, `#[doc(alias = ...)]` and the like carry no text and do not count.
 fn has_doc(attrs: &[Attribute]) -> bool {
-    attrs.iter().any(|a| a.path().is_ident("doc"))
+    attrs.iter().any(|a| match &a.meta {
+        syn::Meta::NameValue(nv) if nv.path.is_ident("doc") => match &nv.value {
+            syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(s),
+                ..
+            }) => !s.value().trim().is_empty(),
+            syn::Expr::Macro(_) => true,
+            _ => false,
+        },
+        _ => false,
+    })
 }
 
 /// Whether an item is test code: `#[test]` or `#[cfg(test)]`.
@@ -141,10 +158,33 @@ fn quote_type(t: &syn::Type) -> String {
     }
 }
 
-/// Checks every file named on the command line and prints the gaps as a JSON array.
+/// The files to check: the arguments, or the non-empty lines of stdin when there are none.
+fn input_paths() -> std::io::Result<Vec<String>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.is_empty() {
+        return Ok(args);
+    }
+    let mut buf = String::new();
+    std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)?;
+    Ok(buf
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect())
+}
+
+/// Checks every input file and prints the gaps as a JSON array.
 fn main() -> ExitCode {
     let mut gaps: Vec<String> = Vec::new();
-    for path in std::env::args().skip(1) {
+    let paths = match input_paths() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("rsdoc: reading stdin: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+    for path in paths {
         let src = match std::fs::read_to_string(&path) {
             Ok(s) => s,
             Err(e) => {
@@ -159,7 +199,7 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
-        if !file.attrs.iter().any(|a| a.path().is_ident("doc")) {
+        if !has_doc(&file.attrs) {
             gaps.push(format!("{}:1: file inner doc (//!)", path));
         }
         let mut c = Checker {
