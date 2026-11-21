@@ -1,0 +1,2 @@
+# docgate exclusions (tools/docgate/docgate.py): fnmatch globs of repository-relative paths.
+# Each entry is documented elsewhere or must not change; see the reason above it.

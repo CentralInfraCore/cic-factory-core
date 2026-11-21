@@ -1,0 +1,30 @@
+name: docgate
+
+# Documentation gate. Every non-test declaration (Python, Go, Rust) must carry a doc
+# comment: the CIC knowledge base reads code only through companion YAMLs whose
+# descriptions come from doc comments, so an undocumented declaration is invisible to it.
+# Rules: tools/docgate/docgate.py. Exceptions (template copies documented upstream,
+# pinned or vendored files): .docgate-exclude. The job fails closed: a missing Go or Rust
+# toolchain is an error, not a pass.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+# Reads and checks only.
+permissions:
+  contents: read
+
+jobs:
+  docgate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Regression tests of the gate itself
+        run: python3 -m unittest discover -s tools/docgate -p "test_*.py" -v
+      - name: Every non-test declaration has a doc comment
+        run: python3 tools/docgate/docgate.py
