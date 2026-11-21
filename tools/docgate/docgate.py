@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2025-2026 Sinkó Gábor Zoltán / CentralInfraCore
 """Documentation gate: every non-test declaration of the repository has a doc comment.
 
 The CIC knowledge base reads code only through companion YAMLs whose descriptions come
@@ -38,7 +40,7 @@ import fnmatch
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 -- fixed argv lists (git, go, cargo, helpers), no shell.
 import sys
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -58,7 +60,7 @@ class GateError(Exception):
 
 def tracked_files(root: Path) -> list[str]:
     """Return the repository-relative paths ``git ls-files`` reports under ``root``."""
-    out = subprocess.run(
+    out = subprocess.run(  # nosec B603 B607 -- fixed argv, `git` from PATH, no shell.
         ["git", "-C", str(root), "ls-files", "-z"],
         capture_output=True,
         text=True,
@@ -159,7 +161,7 @@ def run_helper(cmd: list[str], files: list[str], root: Path, tool: str) -> list[
     The helper must exit 0 and print exactly one JSON list of strings; anything else is
     a GateError, so a broken helper can never read as "no gaps".
     """
-    res = subprocess.run(
+    res = subprocess.run(  # nosec B603 -- cmd is the helper this gate built or DOCGATE_*, no shell.
         cmd, cwd=root, input="\n".join(files) + "\n", capture_output=True, text=True
     )
     if res.returncode != 0:
@@ -195,7 +197,7 @@ def go_gaps(root: Path, files: list[str]) -> list[str]:
     if shutil.which("go") is None:
         raise GateError("Go files are present but `go` is not on PATH")
     out = _scratch_dir("docgate-godoc-") / "godoc"
-    res = subprocess.run(
+    res = subprocess.run(  # nosec B603 B607 -- fixed argv, `go` from PATH, no shell.
         ["go", "build", "-o", str(out), "."],
         cwd=HERE / "godoc",
         capture_output=True,
@@ -215,7 +217,7 @@ def rust_gaps(root: Path, files: list[str]) -> list[str]:
     if shutil.which("cargo") is None:
         raise GateError("Rust files are present but `cargo` is not on PATH")
     target = _scratch_dir("docgate-rsdoc-")
-    res = subprocess.run(
+    res = subprocess.run(  # nosec B603 B607 -- fixed argv, `cargo` from PATH, no shell.
         [
             "cargo",
             "build",
