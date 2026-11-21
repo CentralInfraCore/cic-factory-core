@@ -19,10 +19,16 @@ from datetime import datetime, timezone
 
 
 def ts() -> str:
+    """The current UTC time as an ISO 8601 string with second precision."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def summarize(data: dict, event: str) -> dict:
+    """Reduce one hook payload to the event record: time, event and tool, plus the
+    truncated command or the file path and the success flag (PostToolUse), the truncated
+    error and interrupt flag (PostToolUseFailure) or the session id (Stop). Returns {}
+    for a Stop issued while a stop hook is already active, so it is not logged.
+    """
     tool = data.get("tool_name", "")
     record: dict = {"ts": ts(), "event": event, "tool": tool}
 
@@ -49,6 +55,10 @@ def summarize(data: dict, event: str) -> dict:
 
 
 def main() -> None:
+    """Append the summarized hook payload from stdin to the job's events.jsonl; exits 0
+    without writing when the job environment, the output directory or a parsable payload
+    is missing.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--event", required=True,
                         choices=["PostToolUse", "PostToolUseFailure", "Stop"])
